@@ -17,7 +17,7 @@ export const html = (body: string, status = 200) => () =>
   new Response(body, { status, headers: { "content-type": "text/html" } });
 
 export const msg = (index: number, over: Partial<Message> = {}): Message => ({
-  id: `m${index}`, chatId: "c1", chatName: "Chat", index, from: "u2", fromMe: false,
+  sender: "u2", id: `m${index}`, chatId: "c1", chatName: "Chat", index, from: "u2", fromMe: false,
   date: 2000 + index, text: `msg ${index}`, mentions: [], edited: false, deleted: false, service: false, ...over,
 });
 

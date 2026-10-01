@@ -1,5 +1,22 @@
-.superpowers
+# dependencies and build output
 node_modules
 dist
+
+# credentials, tokens and local state (normally in ~/.config/mizito, ignored in case MIZITO_HOME points inside the repo)
 .env
+.env.*
+credentials.json
+session.json
+logins.json
+names.json
+cursors.json
+watcher.lock
+*.lock.pid
+*.pem
+*.key
+
+# live-probe output may contain private chat data
 spike-output
+
+# agent scratch space
+.superpowers

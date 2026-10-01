@@ -175,3 +175,18 @@ test("watch commits each batch only after printing it", async () => {
   expect(out.filter((l) => l.startsWith("{"))).toHaveLength(1);
   expect(order).toEqual(["commit"]);
 });
+
+test("text output names the sender of each message", async () => {
+  const h = harness({
+    chats: {
+      listChats: async () => [chat],
+      resolveChat: async () => chat,
+      readMessages: async () => [msg(2, { sender: "Sara", text: "hi" }), msg(1, { sender: "me", text: "yo" })],
+      search: async () => [],
+    },
+  });
+  await h.run(["read", "Ata"]);
+  const out = h.out.join("\n");
+  expect(out).toContain("Sara: hi");
+  expect(out).toContain("me: yo");
+});

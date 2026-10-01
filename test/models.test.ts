@@ -51,7 +51,7 @@ const rawMsg = (over: Record<string, unknown> = {}) => ({
 test("parseHistory normalizes a message", () => {
   const [m] = parseHistory([rawMsg({ reply_to: { _id: "m0" }, mention: ["u9", { _id: "u8" }], edited: 1700000001 })], dm, "u1");
   expect(m).toEqual({
-    id: "m1", chatId: "d1", chatName: "Ata", index: 7, from: "u2", fromName: "Ata", fromMe: false,
+    id: "m1", chatId: "d1", chatName: "Ata", index: 7, sender: "Ata", from: "u2", fromName: "Ata", fromMe: false,
     date: 1700000000000, text: "hi", replyTo: "m0", mentions: ["u9", "u8"], edited: true, deleted: false, service: false,
   });
 });
@@ -139,4 +139,15 @@ test("a name resolver never overrides me, and DMs still fall back to the chat na
   const nameOf = () => "Someone";
   expect(parseHistory([rawMsg({ from: "u1" })], group, "u1", nameOf)[0]!.fromName).toBe("me");
   expect(parseHistory([rawMsg()], dm, "u1", () => undefined)[0]!.fromName).toBe("Ata");
+});
+
+test("sender is always set: me, a resolved name, the DM chat name, else the sender id", () => {
+  const nameOf = (id: string) => (id === "u2" ? "Sara" : undefined);
+  const msgs = parseHistory([rawMsg({ from: "u1" }), rawMsg({ _id: "m2", from: "u2" }), rawMsg({ _id: "m3", from: "u9" })], group, "u1", nameOf);
+  expect(msgs.map((m) => m.sender)).toEqual(["me", "Sara", "u9"]);
+  expect(parseHistory([rawMsg()], dm, "u1")[0]!.sender).toBe("Ata");
+});
+
+test("sender is the first key so agents see who said what before anything else", () => {
+  expect(Object.keys(parseHistory([rawMsg()], dm)[0]!)[0]).toBe("sender");
 });

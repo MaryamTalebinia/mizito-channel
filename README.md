@@ -104,6 +104,7 @@ guarantee: don't give an agent that reads chats powerful tools unless you trust 
 
 ```json
 {
+  "sender": "Sara Ahmadi",
   "id": "6a5…",
   "chatId": "692…",
   "chatName": "Team",
@@ -123,9 +124,10 @@ guarantee: don't give an agent that reads chats powerful tools unless you trust 
 ```
 
 - `date` is milliseconds since the epoch. `index` is the chat's running message number.
-- `fromMe` marks your own messages so an agent can ignore them. `fromName` is `"me"` for you and
-  otherwise the sender's name from the workspace user list, in groups as well as direct chats. It is
-  absent only for senders not in that list (for example removed users); `from` always has the id.
+- **`sender` says who wrote the message and is always set**, so an agent can attribute every line:
+  `"me"` for you, otherwise the person's name from the workspace user list (in groups as well as
+  direct chats), and the raw user id only for senders not in that list (for example removed users).
+  `from` is always the user id; `fromName` is the name when known. `fromMe` marks your own messages.
 - Attachments are described, not downloaded. A message with only an attachment has empty `text`;
   the text/CLI views show it as `[photo: a.jpg]`. Kinds seen: `photo`, `video`, `document`, `audio`,
   `taskSchedule`, `mentionInTask`, `mentionInChat`.

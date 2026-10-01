@@ -19,6 +19,8 @@ export interface Attachment {
 }
 
 export interface Message {
+  /** Who said it: "me", the sender's name, the DM chat name, or else the sender id. Always set. */
+  sender: string;
   id: string;
   chatId: string;
   chatName: string;
@@ -151,13 +153,15 @@ export function parseHistory(
     const from = refId(m.from) ?? "";
     const fromMe = userId !== undefined && from === userId;
     const replyTo = refId(m.reply_to);
+    const fromName = fromMe ? "me" : nameOf?.(from) ?? (chat.isGroup ? undefined : chat.name);
     return {
+      sender: fromName ?? from,
       id: m._id,
       chatId: chat.id,
       chatName: chat.name,
       index: m.msg_index,
       from,
-      fromName: fromMe ? "me" : nameOf?.(from) ?? (chat.isGroup ? undefined : chat.name),
+      fromName,
       fromMe,
       date: m.date,
       text: htmlToText(m.message ?? ""),

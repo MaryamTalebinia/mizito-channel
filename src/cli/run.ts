@@ -25,7 +25,7 @@ class Usage extends Error {}
 const EXIT: Record<string, number> = { AUTH: 2, SEND_DISABLED: 3 };
 
 const fmt = (m: Message) =>
-  `[${new Date(m.date).toISOString()}] ${m.chatName} / ${m.fromName ?? m.from}: ${describeMessage(m)}`;
+  `[${new Date(m.date).toISOString()}] ${m.chatName} / ${m.sender}: ${describeMessage(m)}`;
 
 export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<number> {
   try {

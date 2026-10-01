@@ -134,7 +134,7 @@ export async function startPush(server: McpServer, deps: McpDeps, signal: AbortS
               meta: {
                 chat_id: m.chatId,
                 chat_name: m.chatName,
-                sender: m.fromName ?? m.from,
+                sender: m.sender,
                 message_id: m.id,
                 from_me: String(m.fromMe),
               },
