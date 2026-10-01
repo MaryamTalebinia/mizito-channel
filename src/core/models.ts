@@ -6,6 +6,7 @@ export interface Chat {
   id: string;
   name: string;
   isGroup: boolean;
+  peerId?: string;
   unread: number;
   messagesCount: number;
   lastMessageDate?: number;
@@ -25,6 +26,7 @@ export interface Message {
   mentions: string[];
   edited: boolean;
   deleted: boolean;
+  service: boolean;
 }
 
 function toMillis(v: number | string): number {
@@ -46,7 +48,7 @@ const RawDialog = z
     last_message_date: Millis.optional(),
     title: z.string().optional(),
     name: z.string().optional(),
-    peer_user: z.record(z.string(), z.unknown()).optional(),
+    peer_user: z.union([z.string(), z.record(z.string(), z.unknown())]).optional(),
   })
   .loose();
 const DialogsResponse = z.object({ dialogs: z.array(RawDialog) }).loose();
@@ -54,6 +56,7 @@ const DialogsResponse = z.object({ dialogs: z.array(RawDialog) }).loose();
 const RawMessage = z
   .object({
     _id: z.string(),
+    _: z.string().optional(),
     from: Ref,
     date: Millis,
     message: z.string().nullish(),
@@ -87,11 +90,15 @@ function refId(v: unknown): string | undefined {
 }
 
 function dialogName(d: z.output<typeof RawDialog>): string {
-  const peer = d.peer_user;
+  const peer = typeof d.peer_user === "object" ? d.peer_user : undefined;
   const peerName = peer
     ? str(peer.name) ?? (([str(peer.first_name), str(peer.last_name)].filter(Boolean).join(" ")) || undefined)
     : undefined;
   return d.title ?? d.name ?? peerName ?? d._id;
+}
+
+function peerIdOf(v: unknown): string | undefined {
+  return typeof v === "string" ? v : v && typeof v === "object" ? str((v as { _id?: unknown })._id) : undefined;
 }
 
 export function parseDialogs(data: unknown): Chat[] {
@@ -99,6 +106,7 @@ export function parseDialogs(data: unknown): Chat[] {
     id: d._id,
     name: dialogName(d),
     isGroup: d.is_group ?? false,
+    peerId: peerIdOf(d.peer_user),
     unread: d.unread_count ?? 0,
     messagesCount: d.messages_count ?? 0,
     lastMessageDate: d.last_message_date,
@@ -128,6 +136,7 @@ export function parseHistory(
       mentions: (m.mention ?? []).map(refId).filter((x): x is string => x !== undefined),
       edited: Boolean(m.edited),
       deleted: Boolean(m.deleted),
+      service: m._ === "messageService",
     };
   });
 }

@@ -36,7 +36,7 @@ Exit codes: `0` ok, `2` auth error, `3` sending disabled, `64` usage error, `1` 
 { "mcpServers": { "mizito": {
   "command": "bun",
   "args": ["run", "/path/to/mizito-channel/src/cli/main.ts", "mcp"],
-  "env": { "MIZITO_USER_ID": "<your user id>" }
+  "env": {}
 } } }
 ```
 
@@ -59,7 +59,7 @@ Launch Claude Code with the channel loaded (research preview, per the Claude Cod
 | Variable | Meaning |
 |---|---|
 | `MIZITO_USERNAME`, `MIZITO_PASSWORD` | Credentials (override the saved file) |
-| `MIZITO_USER_ID` | Your own user id; marks your messages `fromMe` and is needed to send |
+| `MIZITO_USER_ID` | Optional. Your own user id; derived automatically from your direct chats if unset |
 | `MIZITO_ALLOW_SEND` | `1` enables sending. Off by default |
 | `MIZITO_PUSH` | `1` pushes channel notifications from `mizito mcp` |
 | `MIZITO_HOME` | Config/state dir (default `~/.config/mizito`) |

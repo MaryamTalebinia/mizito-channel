@@ -7,7 +7,7 @@ import { MizitoClient } from "../core/client";
 import { loadConfig } from "../core/config";
 import { CursorStore } from "../core/cursor";
 import { sendMessage } from "../core/send";
-import { FileCredentialStore, FileTokenStore, loadCredentials } from "../core/stores";
+import { FileCredentialStore, FileNameCache, FileTokenStore, loadCredentials } from "../core/stores";
 import { Watcher } from "../core/watcher";
 import { createMcpServer, startPush } from "../mcp/server";
 import { runCli } from "./run";
@@ -61,7 +61,8 @@ async function main(): Promise<number> {
     }) as typeof fetch,
   });
 
-  const chats = new ChatService(client, { userId: config.userId });
+  const names = await FileNameCache.open(join(config.home, "names.json"));
+  const chats = new ChatService(client, { userId: config.userId, names });
   const makeWatcher = async () =>
     new Watcher({ chats, cursors: await CursorStore.open(join(config.home, "cursors.json")) });
   const watcher = await makeWatcher();

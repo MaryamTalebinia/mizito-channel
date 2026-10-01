@@ -61,7 +61,7 @@ export class Watcher {
     } else {
       const floor = prev?.index ?? -1;
       const scan = await this.collectSince(chat, floor, prev ? undefined : this.startedAt);
-      fresh = scan.found.filter((m) => !m.deleted);
+      fresh = scan.found.filter((m) => !m.deleted && !m.service);
       index = Math.max(floor, scan.maxSeen);
     }
     cursors.set(chat.id, { index, count, lastDate });

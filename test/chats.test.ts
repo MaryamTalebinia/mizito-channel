@@ -3,7 +3,7 @@ import { AmbiguousChat, ChatNotFound } from "../src/core/errors";
 import { ChatService, normalizeName } from "../src/core/chats";
 import type { Poster } from "../src/core/client";
 
-function fakePoster(dialogs: unknown[], history: Record<string, unknown[]>) {
+function fakePoster(dialogs: unknown[], history: Record<string, unknown[]>, full: Record<string, unknown> = {}) {
   const calls: { path: string; body: any }[] = [];
   const poster: Poster = {
     async post(path, body) {
@@ -12,6 +12,11 @@ function fakePoster(dialogs: unknown[], history: Record<string, unknown[]>) {
       if (path === "/api/chat/getHistory") {
         const all = history[(body as any).dialog] ?? [];
         return all.slice((body as any).offset, (body as any).offset + 15);
+      }
+      if (path === "/api/chat/getFullChat") {
+        const f = full[(body as any).dialog];
+        if (!f) throw new Error("no full chat");
+        return f;
       }
       throw new Error(`unexpected ${path}`);
     },
@@ -106,4 +111,63 @@ test("resolveChat with exact:true refuses partial names but accepts ids and exac
   expect((await svc.resolveChat("Ata Team", { exact: true })).id).toBe("d3");
   expect((await svc.resolveChat("دستیار میزیتو", { exact: true })).id).toBe("d1");
   await expect(svc.resolveChat("Team", { exact: true })).rejects.toBeInstanceOf(ChatNotFound);
+});
+
+const dmDialogs = [
+  { _id: "dm1", is_group: false, peer_user: "peer1" },
+  { _id: "dm2", is_group: false, peer_user: "peer2" },
+  { _id: "g1", is_group: true, title: "Group One" },
+];
+const fullChats = {
+  dm1: { _id: "dm1", title: "علی رضا", participants: ["peer1", "me-id"] },
+  dm2: { _id: "dm2", title: "Sara", participants: ["me-id", "peer2"] },
+};
+const fullCalls = (f: ReturnType<typeof fakePoster>) => f.calls.filter((c) => c.path.endsWith("getFullChat")).length;
+
+test("DM names come from getFullChat titles; group titles need no lookup", async () => {
+  const f = fakePoster(dmDialogs, {}, fullChats);
+  const chats = await new ChatService(f.poster).listChats();
+  expect(chats.map((c) => c.name)).toEqual(["علی رضا", "Sara", "Group One"]);
+  expect(fullCalls(f)).toBe(2);
+});
+
+test("names are cached: a second listChats makes no extra getFullChat calls", async () => {
+  const f = fakePoster(dmDialogs, {}, fullChats);
+  const svc = new ChatService(f.poster);
+  await svc.listChats();
+  await svc.listChats();
+  expect(fullCalls(f)).toBe(2);
+});
+
+test("a failed name lookup falls back to the id and is retried next time", async () => {
+  const f = fakePoster(dmDialogs, {}, { dm2: fullChats.dm2 });
+  const svc = new ChatService(f.poster);
+  expect((await svc.listChats()).map((c) => c.name)).toEqual(["dm1", "Sara", "Group One"]);
+  expect(fullCalls(f)).toBe(2);
+  await svc.listChats();
+  expect(fullCalls(f)).toBe(3);
+});
+
+test("a persistent name cache is consulted and written", async () => {
+  const store = new Map<string, string>([["dm1", "Cached Name"]]);
+  const names = { get: (id: string) => store.get(id), set: (id: string, n: string) => void store.set(id, n), save: async () => {} };
+  const f = fakePoster(dmDialogs, {}, fullChats);
+  const chats = await new ChatService(f.poster, { names }).listChats();
+  expect(chats[0]!.name).toBe("Cached Name");
+  expect(store.get("dm2")).toBe("Sara");
+  expect(fullCalls(f)).toBe(1);
+});
+
+test("my own id is derived from DM participants when not configured", async () => {
+  const hist = { g1: [{ ...mk(1, "x"), from: "me-id" }, { ...mk(0, "y"), from: "peer9" }] };
+  const f = fakePoster(dmDialogs, hist, fullChats);
+  const msgs = await new ChatService(f.poster).readMessages("g1", { limit: 2 });
+  expect(msgs.map((m) => m.fromMe)).toEqual([true, false]);
+});
+
+test("a configured userId skips derivation", async () => {
+  const f = fakePoster(dmDialogs, { g1: [{ ...mk(1, "x"), from: "cfg" }] }, fullChats);
+  const [m] = await new ChatService(f.poster, { userId: "cfg" }).readMessages("g1", { limit: 1 });
+  expect(m!.fromMe).toBe(true);
+  expect(fullCalls(f)).toBe(2); // only the two name lookups, no extra derivation call
 });

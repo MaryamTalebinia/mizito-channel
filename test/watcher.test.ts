@@ -176,3 +176,14 @@ test("a dialog without change-detection fields is still polled, never silent", a
   history.push(msg(1, { date: 2000 }));
   expect((await w.poll()).map((m) => m.index)).toEqual([1]);
 });
+
+test("service messages are skipped but the cursor still advances", async () => {
+  const { chats, open } = await setup();
+  chats.addChat("c1", [old(0)]);
+  const w = await open();
+  await w.poll();
+  chats.add("c1", fresh(1, { service: true, text: "" }));
+  expect(await w.poll()).toEqual([]);
+  chats.add("c1", fresh(2));
+  expect((await w.poll()).map((m) => m.index)).toEqual([2]);
+});

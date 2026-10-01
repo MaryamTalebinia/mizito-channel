@@ -59,3 +59,26 @@ export async function loadCredentials(
   if (stored) return stored;
   throw new AuthError("No credentials. Run `mizito login` or set MIZITO_USERNAME and MIZITO_PASSWORD.");
 }
+
+export class FileNameCache {
+  private constructor(private readonly path: string, private data: Record<string, string>) {}
+
+  static async open(path: string): Promise<FileNameCache> {
+    const v = await readJson(path);
+    const data: Record<string, string> = {};
+    for (const [k, x] of Object.entries(v ?? {})) if (typeof x === "string") data[k] = x;
+    return new FileNameCache(path, data);
+  }
+
+  get(id: string): string | undefined {
+    return this.data[id];
+  }
+
+  set(id: string, name: string): void {
+    this.data[id] = name;
+  }
+
+  save(): Promise<void> {
+    return writePrivateJson(this.path, this.data);
+  }
+}
