@@ -2,7 +2,8 @@ import { parseArgs } from "node:util";
 import type { ChatService } from "../core/chats";
 import { type Batch, nextBatch } from "../core/watcher";
 import { Backoff } from "../core/backoff";
-import { MizitoError, NetworkError, RateLimited } from "../core/errors";
+import { ConfigError, MizitoError, NetworkError, RateLimited } from "../core/errors";
+import { type HermesFetch, runHermesWatch } from "../core/hermes";
 import { describeMessage, type Message } from "../core/models";
 
 export interface CliDeps {
@@ -13,6 +14,9 @@ export interface CliDeps {
   startMcp: () => Promise<void>;
   pollIntervalMs: number;
   sleep?: (ms: number) => Promise<void>;
+  hermesWebhookUrl?: string;
+  hermesWebhookSecret?: string;
+  hermesFetch?: HermesFetch;
 }
 
 export interface CliIo {
@@ -85,6 +89,25 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
         }
         return 0;
       }
+      case "hermes-watch": {
+        const missing = [
+          !deps.hermesWebhookUrl ? "HERMES_WEBHOOK_URL" : undefined,
+          !deps.hermesWebhookSecret ? "HERMES_WEBHOOK_SECRET" : undefined,
+        ].filter((v): v is string => v !== undefined);
+        if (missing.length > 0) {
+          throw new ConfigError(`Missing required Hermes webhook configuration: ${missing.join(", ")}`);
+        }
+        await runHermesWatch(deps.watcher(), {
+          url: deps.hermesWebhookUrl!,
+          secret: deps.hermesWebhookSecret!,
+          pollIntervalMs: deps.pollIntervalMs,
+          fetch: deps.hermesFetch,
+          sleep: deps.sleep,
+          signal: io.signal,
+          onRetry: (message) => io.err(message),
+        });
+        return 0;
+      }
       case "send": {
         need(2, "send <chat> <text>");
         const chat = await deps.chats.resolveChat(rest[0]!, { exact: true });
@@ -98,7 +121,7 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
         await deps.startMcp();
         return 0;
       default:
-        throw new Usage("usage: mizito <chats|read|search|watch|send|login|mcp> ...");
+        throw new Usage("usage: mizito <chats|read|search|watch|hermes-watch|send|login|mcp> ...");
     }
   } catch (e) {
     if (e instanceof Usage) {

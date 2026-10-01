@@ -105,6 +105,34 @@ test("login and mcp delegate", async () => {
   expect(h.out).toEqual(["logged-in", "mcp-started"]);
 });
 
+test("hermes-watch requires both webhook settings", async () => {
+  const h = harness();
+  expect(await h.run(["hermes-watch"])).toBe(1);
+  expect(h.err.join("\n")).toContain("HERMES_WEBHOOK_URL");
+  expect(h.err.join("\n")).toContain("HERMES_WEBHOOK_SECRET");
+});
+
+test("hermes-watch posts and commits a batch", async () => {
+  const ac = new AbortController();
+  let committed = 0;
+  let posted = 0;
+  const h = harness({
+    hermesWebhookUrl: "https://hermes.example/hook",
+    hermesWebhookSecret: "secret",
+    hermesFetch: async () => { posted++; return new Response(null, { status: 204 }); },
+    watcher: () => ({
+      poll: async () => [],
+      pollBatch: async () => ({
+        messages: [msg(1)],
+        commit: async () => { committed++; ac.abort(); },
+      }),
+    }),
+  }, ac.signal);
+  expect(await h.run(["hermes-watch"])).toBe(0);
+  expect(posted).toBe(1);
+  expect(committed).toBe(1);
+});
+
 test("watch --json streams one JSON line per message until aborted", async () => {
   const ac = new AbortController();
   let n = 0;

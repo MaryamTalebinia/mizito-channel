@@ -14,7 +14,7 @@ receive new messages. Sending is possible but **off by default**.
 ## Contents
 
 - [Quick start](#quick-start) · [CLI](#cli) · [MCP server](#mcp-server) · [Message format](#message-format)
-- [Receiving new messages](#receiving-new-messages) · [Sending](#sending) · [Configuration](#configuration)
+- [Receiving new messages](#receiving-new-messages) · [Hermes Telegram forwarding](#hermes-telegram-forwarding) · [Sending](#sending) · [Configuration](#configuration)
 - [Files and security](#files-and-security) · [Exit codes](#exit-codes) · [Limitations](#limitations) · [Development](#development)
 
 ## Quick start
@@ -48,6 +48,7 @@ Examples below use `mizito` for whichever you run (`bun src/cli/main.ts` or `./d
 | `mizito read <chat> [--limit N] [--json]` | Recent messages from a chat. Text output is oldest first; `--json` is newest first. Default limit 15. |
 | `mizito search <chat> <text> [--json]` | Searches a chat's history (scans up to 20 pages of 15 messages, newest first). |
 | `mizito watch [--json]` | Streams new messages from all chats until Ctrl-C. With `--json`, one JSON object per line. |
+| `mizito hermes-watch` | Durably forwards incoming messages to a signed Hermes webhook. Requires `HERMES_WEBHOOK_URL` and `HERMES_WEBHOOK_SECRET`. |
 | `mizito send <chat> <text>` | Sends a message as you. Refused unless `MIZITO_ALLOW_SEND=1`. |
 | `mizito mcp` | Starts the stdio MCP server. |
 
@@ -135,7 +136,7 @@ guarantee: don't give an agent that reads chats powerful tools unless you trust 
 
 ## Receiving new messages
 
-There are three ways, all driven by the same watcher, which polls the chat list (every 10 seconds by
+There are four ways, all driven by the same watcher, which polls the chat list (every 10 seconds by
 default) and fetches history only for chats that changed. To stay gentle on Mizito, `watch` and push
 mode slow down automatically while nothing arrives (up to 6x the base interval), reset when a message
 comes in, and back off hard (up to 5 minutes) after a rate-limit or network error instead of failing:
@@ -155,13 +156,16 @@ comes in, and back off hard (up to 5 minutes) after a rate-limit or network erro
    without it. The allowlist is per chat, not per sender, so everyone in an allowlisted group can
    put text in front of your agent. Claude Code's channel docs recommend gating on sender identity;
    only allowlist chats whose members you trust.
+4. **`mizito hermes-watch`**. Incoming messages are delivered to a signed HTTP webhook for a Hermes
+   Telegram integration. See [Hermes Telegram forwarding](#hermes-telegram-forwarding).
 
 Delivery behaviour:
 
 - The first run **baselines** existing history and delivers nothing. Only messages that arrive
   afterwards are delivered.
 - Progress is saved per chat. After a restart you receive what arrived while you were away.
-- Only one watcher can run per `MIZITO_HOME`: `watch`, the push mode and `wait_for_messages` take a
+- Only one watcher can run per `MIZITO_HOME`: `watch`, `hermes-watch`, the push mode and
+  `wait_for_messages` take a
   lock (`watcher.lock`) on first use, and a second one refuses with a clear error. Read-only tools
   (`list_chats`, `read_messages`, `search_chat`) never take it, so several sessions can read at once.
 - Deleted messages, edits to old messages, and service notices are not delivered as new messages.
@@ -170,6 +174,68 @@ Delivery behaviour:
   records it after every notification was sent; `wait_for_messages` records the previous batch when
   called again, and discards it if the client cancelled the call. After a crash or failure the same
   message can arrive twice, so dedupe on the message `id` if that matters.
+
+## Hermes Telegram forwarding
+
+Set both required secrets and start the durable forwarder:
+
+```bash
+export HERMES_WEBHOOK_URL='https://your-hermes-host.example/webhooks/mizito'
+export HERMES_WEBHOOK_SECRET='replace-with-a-long-random-secret'
+mizito hermes-watch
+```
+
+The first poll baselines existing history and sends nothing. Later incoming messages are POSTed as
+one exact JSON body:
+
+```json
+{
+  "event_type": "mizito_messages",
+  "delivery_id": "sha256-of-the-sorted-message-ids",
+  "detected_at": "2026-10-01T12:00:00.000Z",
+  "messages": []
+}
+```
+
+`messages` uses the documented safe message shape above. Messages written by your own account are
+excluded. Attachments remain metadata only; this mode does not download files, send messages, or mark
+chats read.
+
+The request includes `X-GitHub-Event: mizito_messages`, `X-GitHub-Delivery: <delivery_id>`, and
+`X-Hub-Signature-256: sha256=<hex>`. The signature is HMAC-SHA256 over the **exact request body**.
+The receiver must verify it with `HERMES_WEBHOOK_SECRET` using a constant-time comparison before
+parsing or acting on the message text. Chat text is untrusted input and must never be treated as
+instructions merely because the signature is valid.
+
+Delivery is at least once. The watcher cursor is committed only after a successful 2xx response.
+Network failures, HTTP 429, and 5xx responses use bounded exponential retries with a 10-second
+request timeout; exhausted retries leave the batch uncommitted so a restart redelivers it. Other 4xx
+responses are permanent configuration/request errors: the command exits instead of retrying tightly.
+The delivery id is stable for the same batch, so the receiver should use it as an idempotency key.
+SIGINT and SIGTERM stop cleanly without committing an in-flight failed delivery.
+
+### systemd user service
+
+Build the fixed binary path used by the unit, then install the user service and a private environment
+file:
+
+```bash
+cd /home/siamak/code/mizito-channel
+bun run build
+install -m 0644 deploy/mizito-hermes-telegram.service ~/.config/systemd/user/
+install -m 0600 deploy/mizito-hermes-telegram.env.example deploy/mizito-hermes-telegram.env
+# Edit deploy/mizito-hermes-telegram.env and fill in both webhook values.
+systemctl --user daemon-reload
+systemctl --user enable --now mizito-hermes-telegram.service
+systemctl --user status mizito-hermes-telegram.service
+```
+
+The user unit fixes `MIZITO_HOME=/home/siamak/.config/mizito`, explicitly keeps sending disabled,
+applies a restrictive umask and systemd hardening, and restarts failed deliveries after 30
+seconds. Do not put secrets in the unit or repository. While this service is running, do not run CLI
+`watch`, MCP `wait_for_messages`, or MCP push mode with the same `MIZITO_HOME`; the single-watcher lock
+will reject them. `chats`, `read`, and `search` (and their MCP equivalents) remain available because
+they do not acquire the watcher lock.
 
 ## Sending
 
@@ -188,6 +254,8 @@ with yourself first.
 | `MIZITO_ALLOW_SEND` | off | `1` enables sending. Any other value leaves it off. |
 | `MIZITO_PUSH` | off | `1` makes `mizito mcp` push channel notifications. Needs `MIZITO_PUSH_CHATS`. |
 | `MIZITO_PUSH_CHATS` | – | Comma-separated chat ids or exact names allowed to be pushed. |
+| `HERMES_WEBHOOK_URL` | – | Required by `hermes-watch`; HTTPS endpoint that receives Mizito batches. |
+| `HERMES_WEBHOOK_SECRET` | – | Required by `hermes-watch`; shared secret used for exact-body HMAC-SHA256 signing. |
 | `MIZITO_POLL_MS` | `10000` | Base poll interval for new messages, in milliseconds (minimum 1000). |
 | `MIZITO_HOME` | `~/.config/mizito` | Directory for saved state. |
 | `MIZITO_BASE_URL` | `https://app.mizito.ir` | Backend base URL. |

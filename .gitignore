@@ -6,6 +6,7 @@ dist
 .env
 .env.*
 !.env.example
+/deploy/mizito-hermes-telegram.env
 credentials.json
 session.json
 logins.json
