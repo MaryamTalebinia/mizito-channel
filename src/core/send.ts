@@ -9,8 +9,6 @@ export interface SendOptions {
   randomHex?: (bytes: number) => string;
 }
 
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
 export async function sendMessage(client: Poster, chatId: string, text: string, o: SendOptions): Promise<void> {
   if (!o.allowSend) throw new SendDisabled();
   if (!o.userId) throw new ConfigError("MIZITO_USER_ID is required to send messages");
@@ -20,7 +18,7 @@ export async function sendMessage(client: Poster, chatId: string, text: string, 
     _: "message",
     _id: hex(12),
     dialog: chatId,
-    message: escapeHtml(text).replace(/\n/g, "<br>"),
+    message: text,
     from: o.userId,
     date: (o.now ?? Date.now)(),
     reply_to: null,

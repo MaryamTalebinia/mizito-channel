@@ -37,10 +37,10 @@ test("posts the web client's message shape", async () => {
   ]);
 });
 
-test("escapes HTML and converts newlines to <br>", async () => {
+test("preserves plain text and newlines without HTML formatting", async () => {
   const r = recorder();
   await sendMessage(r.poster, "d1", "a <b> & c\nd", { allowSend: true, userId: "u1", ...deterministic });
-  expect(r.calls[0]!.body.message).toBe("a &lt;b&gt; &amp; c<br>d");
+  expect(r.calls[0]!.body.message).toBe("a <b> & c\nd");
 });
 
 test("rejects empty text", async () => {
