@@ -93,6 +93,8 @@ async function main(): Promise<number> {
     watcher: () => watcher,
     send,
     pollIntervalMs: config.pollIntervalMs,
+    hermesWebhookUrl: process.env.HERMES_WEBHOOK_URL,
+    hermesWebhookSecret: process.env.HERMES_WEBHOOK_SECRET,
     login: async () => {
       const username = process.env.MIZITO_USERNAME ?? (await readLine("Mizito username: ", false));
       const password = process.env.MIZITO_PASSWORD ?? (await readLine("Mizito password: ", true));
