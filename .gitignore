@@ -5,6 +5,7 @@ dist
 # credentials, tokens and local state (normally in ~/.config/mizito, ignored in case MIZITO_HOME points inside the repo)
 .env
 .env.*
+!.env.example
 credentials.json
 session.json
 logins.json

@@ -183,7 +183,7 @@ with yourself first.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MIZITO_USERNAME`, `MIZITO_PASSWORD` | – | Credentials. Override the saved file. Bun also loads a `.env` file from the current directory automatically (it is gitignored), so running the tool from a folder with a `.env` uses those credentials. |
+| `MIZITO_USERNAME`, `MIZITO_PASSWORD` | – | Credentials. Override the saved file. Bun also loads a `.env` file from the current directory automatically (it is gitignored), so running the tool from a folder with a `.env` uses those credentials. Copy `.env.example` to `.env` to start. |
 | `MIZITO_USER_ID` | derived | Your own user id. Normally not needed; it is fetched automatically. |
 | `MIZITO_ALLOW_SEND` | off | `1` enables sending. Any other value leaves it off. |
 | `MIZITO_PUSH` | off | `1` makes `mizito mcp` push channel notifications. Needs `MIZITO_PUSH_CHATS`. |
