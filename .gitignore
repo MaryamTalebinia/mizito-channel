@@ -20,3 +20,6 @@ spike-output
 
 # agent scratch space
 .superpowers
+
+# bun build temp artifacts
+*.bun-build
