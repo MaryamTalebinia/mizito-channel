@@ -1,7 +1,8 @@
 import { parseArgs } from "node:util";
 import type { ChatService } from "../core/chats";
 import { type Batch, nextBatch } from "../core/watcher";
-import { MizitoError } from "../core/errors";
+import { Backoff } from "../core/backoff";
+import { MizitoError, NetworkError, RateLimited } from "../core/errors";
 import { describeMessage, type Message } from "../core/models";
 
 export interface CliDeps {
@@ -66,12 +67,21 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
       case "watch": {
         const watcher = deps.watcher();
         const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+        const backoff = new Backoff({ baseMs: deps.pollIntervalMs });
         while (!io.signal?.aborted) {
-          const batch = await nextBatch(watcher);
-          for (const m of batch.messages) io.out(json ? JSON.stringify(m) : fmt(m));
-          await batch.commit();
+          let delay: number;
+          try {
+            const batch = await nextBatch(watcher);
+            for (const m of batch.messages) io.out(json ? JSON.stringify(m) : fmt(m));
+            await batch.commit();
+            delay = backoff.next(batch.messages.length > 0 ? "messages" : "idle");
+          } catch (e) {
+            if (!(e instanceof RateLimited || e instanceof NetworkError)) throw e;
+            io.err(`${e.message} (retrying)`);
+            delay = backoff.next(e instanceof RateLimited ? "rateLimited" : "error");
+          }
           if (io.signal?.aborted) break;
-          await sleep(deps.pollIntervalMs);
+          await sleep(delay);
         }
         return 0;
       }

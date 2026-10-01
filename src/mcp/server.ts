@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { ChatService } from "../core/chats";
-import { MizitoError } from "../core/errors";
+import { Backoff } from "../core/backoff";
+import { MizitoError, RateLimited } from "../core/errors";
 import { describeMessage, type Message } from "../core/models";
 import { type Batch, nextBatch, waitForMessages } from "../core/watcher";
 
@@ -22,6 +23,7 @@ export interface McpDeps {
   push: boolean;
   pushChatIds?: Set<string>;
   pollIntervalMs: number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const UNTRUSTED =
@@ -120,9 +122,11 @@ export function createMcpServer(deps: McpDeps): McpServer {
 }
 
 export async function startPush(server: McpServer, deps: McpDeps, signal: AbortSignal): Promise<void> {
-  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const backoff = new Backoff({ baseMs: deps.pollIntervalMs });
   void (async () => {
     while (!signal.aborted) {
+      let outcome: "messages" | "idle" | "rateLimited" | "error" = "idle";
       try {
         const batch = await nextBatch(deps.watcher);
         for (const m of batch.messages) {
@@ -142,10 +146,12 @@ export async function startPush(server: McpServer, deps: McpDeps, signal: AbortS
           });
         }
         await batch.commit();
+        outcome = batch.messages.length > 0 ? "messages" : "idle";
       } catch (e) {
         console.error("mizito push poll failed:", e instanceof Error ? e.message : e);
+        outcome = e instanceof RateLimited ? "rateLimited" : "error";
       }
-      if (!signal.aborted) await sleep(deps.pollIntervalMs);
+      if (!signal.aborted) await sleep(backoff.next(outcome));
     }
   })();
 }

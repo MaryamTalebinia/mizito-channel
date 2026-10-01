@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer, startPush, type McpDeps } from "../src/mcp/server";
-import { AmbiguousChat } from "../src/core/errors";
+import { AmbiguousChat, RateLimited } from "../src/core/errors";
 import type { Chat } from "../src/core/models";
 import { msg } from "./helpers";
 
@@ -210,4 +210,32 @@ test("push does not commit when a notification fails, so the batch is retried", 
   ac.abort();
   expect(commits).toBe(0);
   expect(polls).toBeGreaterThanOrEqual(2); // retried
+});
+
+test("push backs off while idle and after errors, using the injected sleep", async () => {
+  const delays: number[] = [];
+  const ac = new AbortController();
+  let polls = 0;
+  const d = deps({
+    push: true,
+    pollIntervalMs: 1000,
+    sleep: async (ms: number) => { delays.push(ms); },
+    watcher: {
+      poll: async () => {
+        polls++;
+        if (polls === 1) return [];
+        if (polls === 2) throw new RateLimited();
+        if (polls === 3) return [msg(1, { text: "x" })];
+        ac.abort();
+        return [];
+      },
+    },
+  });
+  const { server } = await connect(d);
+  const orig = console.error;
+  console.error = () => {};
+  await startPush(server, d, ac.signal);
+  await new Promise((r) => setTimeout(r, 30));
+  console.error = orig;
+  expect(delays).toEqual([1500, 3000, 1000]);
 });

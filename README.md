@@ -135,8 +135,10 @@ guarantee: don't give an agent that reads chats powerful tools unless you trust 
 
 ## Receiving new messages
 
-There are three ways, all driven by the same watcher, which polls the chat list every few seconds
-and fetches history only for chats that changed:
+There are three ways, all driven by the same watcher, which polls the chat list (every 10 seconds by
+default) and fetches history only for chats that changed. To stay gentle on Mizito, `watch` and push
+mode slow down automatically while nothing arrives (up to 6x the base interval), reset when a message
+comes in, and back off hard (up to 5 minutes) after a rate-limit or network error instead of failing:
 
 1. **`wait_for_messages`** (MCP, default). The agent calls it in a loop.
 2. **`mizito watch --json`** (CLI). Pipe JSON lines into any script or agent.
@@ -186,7 +188,7 @@ with yourself first.
 | `MIZITO_ALLOW_SEND` | off | `1` enables sending. Any other value leaves it off. |
 | `MIZITO_PUSH` | off | `1` makes `mizito mcp` push channel notifications. Needs `MIZITO_PUSH_CHATS`. |
 | `MIZITO_PUSH_CHATS` | – | Comma-separated chat ids or exact names allowed to be pushed. |
-| `MIZITO_POLL_MS` | `3000` | Poll interval for new messages, in milliseconds. |
+| `MIZITO_POLL_MS` | `10000` | Base poll interval for new messages, in milliseconds (minimum 1000). |
 | `MIZITO_HOME` | `~/.config/mizito` | Directory for saved state. |
 | `MIZITO_BASE_URL` | `https://app.mizito.ir` | Backend base URL. |
 
@@ -223,7 +225,7 @@ Everything lives in `MIZITO_HOME` (default `~/.config/mizito`), created with mod
 
 - Unofficial API: field names and behaviour can change. Unexpected responses surface as clear errors
   rather than silent failures.
-- Polling, not realtime: new messages appear within one poll interval. Mizito's web app uses
+- Polling, not realtime: new messages appear within one poll interval (10 s by default, longer when idle). Mizito's web app uses
   socket.io; using it is not implemented yet.
 - The first poll after a fresh start fetches one page per chat, which takes several seconds for
   large accounts.

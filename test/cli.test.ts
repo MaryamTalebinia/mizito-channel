@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { runCli, type CliDeps } from "../src/cli/run";
-import { AuthError, SendDisabled } from "../src/core/errors";
+import { AuthError, NetworkError, RateLimited, SendDisabled } from "../src/core/errors";
 import type { Chat } from "../src/core/models";
 import { msg } from "./helpers";
 
@@ -189,4 +189,55 @@ test("text output names the sender of each message", async () => {
   const out = h.out.join("\n");
   expect(out).toContain("Sara: hi");
   expect(out).toContain("me: yo");
+});
+
+test("watch backs off while idle and resets after a message", async () => {
+  const ac = new AbortController();
+  const delays: number[] = [];
+  const script = [[], [], [msg(1, { text: "hi" })], [], "stop"] as const;
+  let i = 0;
+  const h = harness(
+    {
+      pollIntervalMs: 1000,
+      sleep: async (ms) => { delays.push(ms); },
+      watcher: () => ({
+        poll: async () => {
+          const step = script[i++]!;
+          if (step === "stop") { ac.abort(); return []; }
+          return [...step];
+        },
+      }),
+    },
+    ac.signal,
+  );
+  expect(await h.run(["watch"])).toBe(0);
+  expect(delays).toEqual([1500, 2250, 1000, 1500]);
+});
+
+test("watch survives rate limiting and network errors by backing off, but exits on auth errors", async () => {
+  const ac = new AbortController();
+  const delays: number[] = [];
+  let i = 0;
+  const h = harness(
+    {
+      pollIntervalMs: 1000,
+      sleep: async (ms) => { delays.push(ms); },
+      watcher: () => ({
+        poll: async () => {
+          i++;
+          if (i === 1) throw new RateLimited();
+          if (i === 2) throw new NetworkError("down");
+          ac.abort();
+          return [];
+        },
+      }),
+    },
+    ac.signal,
+  );
+  expect(await h.run(["watch"])).toBe(0);
+  expect(delays).toEqual([2000, 4000]);
+  expect(h.err.join("\n")).toContain("rate-limited");
+
+  const bad = harness({ watcher: () => ({ poll: async () => { throw new AuthError("session dead"); } }) });
+  expect(await bad.run(["watch"])).toBe(2);
 });
