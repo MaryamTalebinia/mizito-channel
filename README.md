@@ -240,10 +240,9 @@ they do not acquire the watcher lock.
 ## Sending
 
 Disabled unless `MIZITO_ALLOW_SEND=1`. When off, `send_message` doesn't exist as a tool and the CLI
-refuses with exit code 3. When on, messages are sent **as you**, to an exact chat id or name. Plain
-text is HTML-escaped and newlines become line breaks. Replies, mentions and attachments aren't
-supported. Note that sending has not been exercised against the live service, so try it on a chat
-with yourself first.
+refuses with exit code 3. When on, messages are sent **as you**, to an exact chat id or name. Text is
+sent exactly as plain text and newline characters are preserved; Mizito does not render HTML tags.
+Replies, mentions and attachments aren't supported.
 
 ## Configuration
 
