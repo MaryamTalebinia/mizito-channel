@@ -49,7 +49,9 @@ export class Watcher {
     const prev = cursors.get(chat.id);
     const count = chat.messagesCount;
     const lastDate = chat.lastMessageDate ?? 0;
-    if (prev && prev.count === count && prev.lastDate === lastDate) return [];
+    // Without either change-detection field we cannot tell "unchanged" from "unknown": always look.
+    const hasSignal = count !== 0 || chat.lastMessageDate !== undefined;
+    if (prev && hasSignal && prev.count === count && prev.lastDate === lastDate) return [];
 
     let fresh: Message[];
     let index: number;
@@ -58,21 +60,27 @@ export class Watcher {
       fresh = [];
     } else {
       const floor = prev?.index ?? -1;
-      const found = await this.collectSince(chat, floor, prev ? undefined : this.startedAt);
-      fresh = found.filter((m) => !m.deleted);
-      index = maxIndex(found, floor);
+      const scan = await this.collectSince(chat, floor, prev ? undefined : this.startedAt);
+      fresh = scan.found.filter((m) => !m.deleted);
+      index = Math.max(floor, scan.maxSeen);
     }
     cursors.set(chat.id, { index, count, lastDate });
     return fresh;
   }
 
-  private async collectSince(chat: Chat, floor: number, notBefore?: number): Promise<Message[]> {
+  private async collectSince(
+    chat: Chat,
+    floor: number,
+    notBefore?: number,
+  ): Promise<{ found: Message[]; maxSeen: number }> {
     const found: Message[] = [];
+    let maxSeen = -1;
     let offset = 0;
     for (let page = 0; page < MAX_PAGES_PER_CHAT; page++) {
       const batch = await this.deps.chats.history(chat, offset);
       if (batch.length === 0) break;
       let reachedOld = false;
+      maxSeen = maxIndex(batch, maxSeen);
       for (const m of batch) {
         if (m.index <= floor || (notBefore !== undefined && m.date < notBefore)) reachedOld = true;
         else found.push(m);
@@ -80,7 +88,7 @@ export class Watcher {
       if (reachedOld) break;
       offset += batch.length;
     }
-    return found.sort((a, b) => a.index - b.index);
+    return { found: found.sort((a, b) => a.index - b.index), maxSeen };
   }
 }
 

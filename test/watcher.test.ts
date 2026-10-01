@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CursorStore } from "../src/core/cursor";
 import { Watcher, waitForMessages } from "../src/core/watcher";
+import type { Message } from "../src/core/models";
 import { FakeChats, msg } from "./helpers";
 
 const NOW = 1500;
@@ -150,4 +151,28 @@ test("waitForMessages gives up with [] at the timeout", async () => {
   });
   expect(got).toEqual([]);
   expect(t).toBeLessThanOrEqual(1000);
+});
+
+test("a chat appearing after start with only old history does not dump its backlog later", async () => {
+  const { chats, open } = await setup();
+  chats.addChat("c1", [old(0)]);
+  const w = await open();
+  await w.poll();
+  chats.addChat("c2", [old(0), old(1), old(2)]);
+  expect(await w.poll()).toEqual([]);
+  chats.add("c2", fresh(3));
+  expect((await w.poll()).map((m) => m.index)).toEqual([3]);
+});
+
+test("a dialog without change-detection fields is still polled, never silent", async () => {
+  const path = join(await mkdtemp(join(tmpdir(), "mizito-")), "cursors.json");
+  const history: Message[] = [msg(0, { date: 500 })];
+  const source = {
+    listChats: async () => [{ id: "c1", name: "c1", isGroup: true, unread: 0, messagesCount: 0 }],
+    history: async (_c: unknown, offset: number) => [...history].reverse().slice(offset, offset + 15),
+  };
+  const w = new Watcher({ chats: source, cursors: await CursorStore.open(path), now: () => NOW });
+  await w.poll();
+  history.push(msg(1, { date: 2000 }));
+  expect((await w.poll()).map((m) => m.index)).toEqual([1]);
 });

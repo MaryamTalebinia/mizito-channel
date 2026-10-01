@@ -117,3 +117,17 @@ test("watch --json streams one JSON line per message until aborted", async () =>
   expect(lines).toHaveLength(1);
   expect(JSON.parse(lines[0]!).text).toBe("ping");
 });
+
+test("send resolves the chat with exact matching only", async () => {
+  let seen: unknown;
+  const h = harness({
+    chats: {
+      listChats: async () => [chat],
+      resolveChat: async (_ref: string, o?: unknown) => { seen = o; return chat; },
+      readMessages: async () => [],
+      search: async () => [],
+    },
+  });
+  await h.run(["send", "At", "hi"]);
+  expect(seen).toEqual({ exact: true });
+});

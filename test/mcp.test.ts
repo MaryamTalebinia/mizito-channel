@@ -126,3 +126,12 @@ test("push mode drops wait_for_messages and pushes channel notifications", async
   expect(got[0].params.content).toBe("pushed");
   expect(got[0].params.meta.chat_name).toBe("Ata");
 });
+
+test("send_message resolves the chat with exact matching only", async () => {
+  let seen: unknown;
+  const d = deps({ allowSend: true });
+  d.chats.resolveChat = async (_ref: string, o?: unknown) => { seen = o; return chat; };
+  const { client } = await connect(d);
+  await client.callTool({ name: "send_message", arguments: { chat: "At", text: "hi" } });
+  expect(seen).toEqual({ exact: true });
+});

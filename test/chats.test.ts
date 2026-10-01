@@ -99,3 +99,11 @@ test("messages know which are mine when userId is configured", async () => {
   const [m] = await new ChatService(f.poster, { userId: "me-id" }).readMessages("d3", { limit: 1 });
   expect(m!.fromMe).toBe(true);
 });
+
+test("resolveChat with exact:true refuses partial names but accepts ids and exact names", async () => {
+  const svc = new ChatService(fakePoster(dialogs, {}).poster);
+  expect((await svc.resolveChat("d3", { exact: true })).id).toBe("d3");
+  expect((await svc.resolveChat("Ata Team", { exact: true })).id).toBe("d3");
+  expect((await svc.resolveChat("دستیار میزیتو", { exact: true })).id).toBe("d1");
+  await expect(svc.resolveChat("Team", { exact: true })).rejects.toBeInstanceOf(ChatNotFound);
+});

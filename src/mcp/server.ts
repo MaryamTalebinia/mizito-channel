@@ -99,7 +99,7 @@ export function createMcpServer(deps: McpDeps): McpServer {
       },
       ({ chat, text }) =>
         guard(async () => {
-          const c = await deps.chats.resolveChat(chat);
+          const c = await deps.chats.resolveChat(chat, { exact: true });
           await deps.send(c.id, text);
           return { sent: true, chat: c.name };
         }),

@@ -34,13 +34,14 @@ export class ChatService implements ChatSource {
     return parseHistory(raw, chat, this.opts.userId);
   }
 
-  async resolveChat(ref: string): Promise<Chat> {
+  async resolveChat(ref: string, o: { exact?: boolean } = {}): Promise<Chat> {
     const chats = await this.listChats();
     const byId = chats.find((c) => c.id === ref);
     if (byId) return byId;
     const q = normalizeName(ref);
     const exact = chats.filter((c) => normalizeName(c.name) === q);
-    const pool = exact.length > 0 ? exact : chats.filter((c) => normalizeName(c.name).includes(q));
+    const partial = o.exact ? [] : chats.filter((c) => normalizeName(c.name).includes(q));
+    const pool = exact.length > 0 ? exact : partial;
     if (pool.length === 0) throw new ChatNotFound(ref);
     if (pool.length > 1) throw new AmbiguousChat(ref, pool.map((c) => c.name));
     return pool[0]!;

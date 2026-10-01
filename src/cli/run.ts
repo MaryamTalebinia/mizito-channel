@@ -71,7 +71,7 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
       }
       case "send": {
         need(2, "send <chat> <text>");
-        const chat = await deps.chats.resolveChat(rest[0]!);
+        const chat = await deps.chats.resolveChat(rest[0]!, { exact: true });
         await deps.send(chat.id, rest.slice(1).join(" "));
         return 0;
       }
