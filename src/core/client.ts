@@ -1,5 +1,5 @@
 import { type Credentials, login } from "./auth";
-import { AuthError, NetworkError, RateLimited, SchemaError } from "./errors";
+import { AuthError, MizitoError, NetworkError, RateLimited, SchemaError } from "./errors";
 
 export interface Poster {
   post(path: string, body?: unknown): Promise<unknown>;
@@ -54,6 +54,7 @@ export class MizitoClient implements Poster {
         body: JSON.stringify(body),
       });
     } catch (e) {
+      if (e instanceof MizitoError) throw e;
       throw new NetworkError(`Could not reach Mizito: ${(e as Error).message}`);
     }
   }

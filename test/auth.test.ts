@@ -40,3 +40,10 @@ test("network failure on login throws NetworkError", async () => {
   const f = scriptedFetch([() => { throw new Error("boom"); }]);
   await expect(login(f, "https://x", creds)).rejects.toBeInstanceOf(NetworkError);
 });
+
+test("a typed error thrown by fetch is not rewrapped as NetworkError", async () => {
+  const f = scriptedFetch([() => { throw new AuthError("No credentials"); }]);
+  const err = await login(f, "https://x", creds).catch((e) => e);
+  expect(err).toBeInstanceOf(AuthError);
+  expect(err.message).toBe("No credentials");
+});

@@ -80,10 +80,12 @@ detected, so replacing polling with socket.io touches nothing outside it.
   second failure surfaces as an auth error.
 - Workspace: selected via `MIZITO_WORKSPACE` or config; `workspace.switch`
   returns a new token, which replaces the session token.
-- Credentials: macOS Keychain via `security`, falling back to
-  `MIZITO_USERNAME` / `MIZITO_PASSWORD` env or `.env`. `mizito login` stores
-  them. Credentials and tokens are never logged or returned in tool output.
-  State and credential files are created with mode 0600.
+- Credentials: `MIZITO_USERNAME` / `MIZITO_PASSWORD` env, then a 0600 credentials
+  file in `MIZITO_HOME`; `mizito login` writes it. Keychain is deferred because
+  `security add-generic-password -w` exposes the secret in process arguments.
+  The session token is cached in `MIZITO_HOME/session.json` (0600). The user's own id
+  comes from `MIZITO_USER_ID` (needed for `fromMe` and for sending). Credentials and
+  tokens are never logged or returned in tool output.
 - Endpoints used:
   - `POST /api/chat/getDialogs {}` -> dialogs with `_id, is_group, unread_count,
     messages_count, last_message_date, peer_user`
@@ -117,9 +119,9 @@ One watcher in `core`, three outputs.
 - Cursor: per-dialog last-seen `msg_index` in a local state file. First run
   starts from "now" and does not replay old history. Messages are emitted in
   `msg_index` order, exactly once, across restarts.
-- Realtime: the web app uses socket.io. An early spike checks whether it can be
-  used from the client with the user's token. If so it replaces polling inside
-  the watcher; polling remains as fallback.
+- Realtime: the web app uses socket.io. v1 ships polling only; whether socket.io is usable
+  is recorded by the live spike and, if so, gets a follow-up plan that replaces polling
+  inside the watcher.
 - Outputs:
   1. MCP tool `wait_for_messages` (long-poll with timeout, returns a batch).
   2. MCP channel notifications pushing messages into the session.

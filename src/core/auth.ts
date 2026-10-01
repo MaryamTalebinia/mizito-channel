@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { AuthError, NetworkError } from "./errors";
+import { AuthError, MizitoError, NetworkError } from "./errors";
 
 export interface Credentials {
   username: string;
@@ -21,6 +21,7 @@ export async function login(f: typeof fetch, baseUrl: string, c: Credentials): P
       body: JSON.stringify({ username: c.username, password: hashPassword(c.password), loginCode: "", regId: "" }),
     });
   } catch (e) {
+    if (e instanceof MizitoError) throw e;
     throw new NetworkError(`Could not reach Mizito: ${(e as Error).message}`);
   }
   if (!res.ok) throw new AuthError(`Login failed: HTTP ${res.status}`);
