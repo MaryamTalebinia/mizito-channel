@@ -1,0 +1,20 @@
+{
+  "name": "mizito-channel",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": { "mizito": "src/cli/main.ts" },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build --compile src/cli/main.ts --outfile dist/mizito"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "zod": "^4.6.5"
+  }
+}
