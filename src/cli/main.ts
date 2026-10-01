@@ -86,7 +86,7 @@ async function main(): Promise<number> {
   };
 
   const ac = new AbortController();
-  process.on("SIGINT", () => ac.abort());
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(sig, () => ac.abort());
 
   return runCli(process.argv.slice(2), {
     chats,
@@ -110,6 +110,7 @@ async function main(): Promise<number> {
         mcpDeps.pushChatIds = new Set((await Promise.all(config.pushChats.map((c) => chats.resolveChat(c, { exact: true })))).map((c) => c.id));
       }
       const server = createMcpServer(mcpDeps);
+      server.server.onclose = () => ac.abort(); // client disconnected: shut down cleanly so exit handlers run
       await server.connect(new StdioServerTransport());
       if (mcpDeps.push) await startPush(server, mcpDeps, ac.signal);
       await new Promise<void>((r) => ac.signal.addEventListener("abort", () => r()));
