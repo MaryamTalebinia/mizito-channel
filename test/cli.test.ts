@@ -131,3 +131,16 @@ test("send resolves the chat with exact matching only", async () => {
   await h.run(["send", "At", "hi"]);
   expect(seen).toEqual({ exact: true });
 });
+
+test("read shows attachment-only messages as a bracketed description", async () => {
+  const h = harness({
+    chats: {
+      listChats: async () => [chat],
+      resolveChat: async () => chat,
+      readMessages: async () => [msg(1, { text: "", attachment: { kind: "photo", name: "a.jpg" } })],
+      search: async () => [],
+    },
+  });
+  await h.run(["read", "Ata"]);
+  expect(h.out.join("\n")).toContain("[photo: a.jpg]");
+});

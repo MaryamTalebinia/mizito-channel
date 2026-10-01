@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import type { ChatService } from "../core/chats";
 import { MizitoError } from "../core/errors";
-import type { Message } from "../core/models";
+import { describeMessage, type Message } from "../core/models";
 
 export interface CliDeps {
   chats: Pick<ChatService, "listChats" | "resolveChat" | "readMessages" | "search">;
@@ -24,7 +24,7 @@ class Usage extends Error {}
 const EXIT: Record<string, number> = { AUTH: 2, SEND_DISABLED: 3 };
 
 const fmt = (m: Message) =>
-  `[${new Date(m.date).toISOString()}] ${m.chatName} / ${m.fromName ?? m.from}: ${m.text}`;
+  `[${new Date(m.date).toISOString()}] ${m.chatName} / ${m.fromName ?? m.from}: ${describeMessage(m)}`;
 
 export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<number> {
   try {

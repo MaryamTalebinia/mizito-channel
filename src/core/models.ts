@@ -12,6 +12,12 @@ export interface Chat {
   lastMessageDate?: number;
 }
 
+export interface Attachment {
+  kind: string;
+  name?: string;
+  size?: number;
+}
+
 export interface Message {
   id: string;
   chatId: string;
@@ -27,6 +33,7 @@ export interface Message {
   edited: boolean;
   deleted: boolean;
   service: boolean;
+  attachment?: Attachment;
 }
 
 function toMillis(v: number | string): number {
@@ -65,6 +72,7 @@ const RawMessage = z
     mention: z.array(z.unknown()).optional(),
     edited: z.unknown().optional(),
     deleted: z.unknown().optional(),
+    media: z.unknown().optional(),
   })
   .loose();
 const HistoryResponse = z.union([
@@ -87,6 +95,26 @@ function refId(v: unknown): string | undefined {
   if (typeof v === "string") return v;
   if (v && typeof v === "object") return str((v as { _id?: unknown })._id);
   return undefined;
+}
+
+function attachmentOf(media: unknown): Attachment | undefined {
+  if (!media || typeof media !== "object") return undefined;
+  const o = media as Record<string, unknown>;
+  const key = Object.keys(o).find((k) => k !== "_");
+  const raw = typeof o._ === "string" ? o._.replace(/^messageMedia/, "") : key ?? "";
+  if (!raw) return undefined;
+  const kind = raw.charAt(0).toLowerCase() + raw.slice(1);
+  const inner = key ? o[key] : undefined;
+  const rec = inner && typeof inner === "object" ? (inner as Record<string, unknown>) : undefined;
+  const name = str(rec?.name) ?? str(rec?.title);
+  const size = typeof rec?.size === "number" ? rec.size : undefined;
+  return { kind, ...(name ? { name } : {}), ...(size !== undefined ? { size } : {}) };
+}
+
+export function describeMessage(m: Pick<Message, "text" | "attachment">): string {
+  if (m.text) return m.text;
+  if (!m.attachment) return "";
+  return `[${m.attachment.kind}${m.attachment.name ? `: ${m.attachment.name}` : ""}]`;
 }
 
 function dialogName(d: z.output<typeof RawDialog>): string {
@@ -137,6 +165,24 @@ export function parseHistory(
       edited: Boolean(m.edited),
       deleted: Boolean(m.deleted),
       service: m._ === "messageService",
+      ...(attachmentOf(m.media) ? { attachment: attachmentOf(m.media)! } : {}),
     };
   });
+}
+
+const UsersResponse = z
+  .object({
+    users: z.array(
+      z.object({ _id: z.string(), first_name: z.string().nullish(), last_name: z.string().nullish() }).loose(),
+    ),
+  })
+  .loose();
+
+export function parseUserNames(data: unknown): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const u of parse("workspace/getUsers", UsersResponse, data).users) {
+    const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+    if (name) out.set(u._id, name);
+  }
+  return out;
 }

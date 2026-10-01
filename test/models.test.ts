@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { SchemaError } from "../src/core/errors";
-import { parseDialogs, parseHistory } from "../src/core/models";
+import { describeMessage, parseDialogs, parseHistory } from "../src/core/models";
 
 const dm = { id: "d1", name: "Ata", isGroup: false };
 const group = { id: "g1", name: "Team", isGroup: true };
@@ -95,4 +95,36 @@ test("parseDialogs accepts a string peer_user as peerId and falls back to the id
 test("parseHistory flags service messages", () => {
   const msgs = parseHistory([rawMsg({ _: "messageService" }), rawMsg({ _id: "m2", _: "message" }), rawMsg({ _id: "m3" })], dm);
   expect(msgs.map((m) => m.service)).toEqual([true, false, false]);
+});
+
+test("parseHistory describes attachments without downloading anything", () => {
+  const [photo, doc, task, mention, none] = parseHistory(
+    [
+      rawMsg({ message: "", media: { _: "messageMediaPhoto", photo: { name: "a.jpg" } } }),
+      rawMsg({ _id: "m2", message: "", media: { _: "messageMediaDocument", document: { name: "report.pdf", size: 1234 } } }),
+      rawMsg({ _id: "m3", message: "", media: { _: "messageMediaTaskSchedule", task: { title: "Fix login" } } }),
+      rawMsg({ _id: "m4", message: "", media: { _: "messageMediaMentionInChat", dialog: "d" } }),
+      rawMsg({ _id: "m5", media: null }),
+    ],
+    dm,
+  );
+  expect(photo!.attachment).toEqual({ kind: "photo", name: "a.jpg" });
+  expect(doc!.attachment).toEqual({ kind: "document", name: "report.pdf", size: 1234 });
+  expect(task!.attachment).toEqual({ kind: "taskSchedule", name: "Fix login" });
+  expect(mention!.attachment).toEqual({ kind: "mentionInChat" });
+  expect(none!.attachment).toBeUndefined();
+});
+
+test("describeMessage shows text, or a bracketed attachment when there is no text", () => {
+  const [a, b, c] = parseHistory(
+    [
+      rawMsg({ message: "hello" }),
+      rawMsg({ _id: "m2", message: "", media: { _: "messageMediaDocument", document: { name: "r.pdf" } } }),
+      rawMsg({ _id: "m3", message: "", media: { _: "messageMediaAudio", audio: {} } }),
+    ],
+    dm,
+  );
+  expect(describeMessage(a!)).toBe("hello");
+  expect(describeMessage(b!)).toBe("[document: r.pdf]");
+  expect(describeMessage(c!)).toBe("[audio]");
 });

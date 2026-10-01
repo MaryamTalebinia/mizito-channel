@@ -135,3 +135,17 @@ test("send_message resolves the chat with exact matching only", async () => {
   await client.callTool({ name: "send_message", arguments: { chat: "At", text: "hi" } });
   expect(seen).toEqual({ exact: true });
 });
+
+test("push content falls back to an attachment description when there is no text", async () => {
+  const d = deps({ push: true });
+  const { server, client } = await connect(d);
+  const got: any[] = [];
+  client.fallbackNotificationHandler = async (n) => { got.push(n); };
+  const ac = new AbortController();
+  let polls = 0;
+  d.watcher.poll = async () =>
+    ++polls === 1 ? [msg(6, { text: "", attachment: { kind: "photo", name: "a.jpg" } })] : (ac.abort(), []);
+  await startPush(server, d, ac.signal);
+  await new Promise((r) => setTimeout(r, 10));
+  expect(got[0].params.content).toBe("[photo: a.jpg]");
+});

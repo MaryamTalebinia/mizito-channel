@@ -3,7 +3,8 @@ import { AmbiguousChat, ChatNotFound } from "../src/core/errors";
 import { ChatService, normalizeName } from "../src/core/chats";
 import type { Poster } from "../src/core/client";
 
-function fakePoster(dialogs: unknown[], history: Record<string, unknown[]>, full: Record<string, unknown> = {}) {
+interface Extra { users?: unknown[]; uid?: string; usersFail?: boolean }
+function fakePoster(dialogs: unknown[], history: Record<string, unknown[]>, extra: Extra = {}) {
   const calls: { path: string; body: any }[] = [];
   const poster: Poster = {
     async post(path, body) {
@@ -13,11 +14,11 @@ function fakePoster(dialogs: unknown[], history: Record<string, unknown[]>, full
         const all = history[(body as any).dialog] ?? [];
         return all.slice((body as any).offset, (body as any).offset + 15);
       }
-      if (path === "/api/chat/getFullChat") {
-        const f = full[(body as any).dialog];
-        if (!f) throw new Error("no full chat");
-        return f;
+      if (path === "/api/workspace/getUsers") {
+        if (extra.usersFail) throw new Error("users failed");
+        return { users: extra.users ?? [] };
       }
+      if (path === "/api/workspace/userId") return { uid: extra.uid ?? "" };
       throw new Error(`unexpected ${path}`);
     },
   };
@@ -118,56 +119,63 @@ const dmDialogs = [
   { _id: "dm2", is_group: false, peer_user: "peer2" },
   { _id: "g1", is_group: true, title: "Group One" },
 ];
-const fullChats = {
-  dm1: { _id: "dm1", title: "علی رضا", participants: ["peer1", "me-id"] },
-  dm2: { _id: "dm2", title: "Sara", participants: ["me-id", "peer2"] },
-};
-const fullCalls = (f: ReturnType<typeof fakePoster>) => f.calls.filter((c) => c.path.endsWith("getFullChat")).length;
+const users = [
+  { _id: "peer1", first_name: "علی", last_name: "رضا" },
+  { _id: "peer2", first_name: "Sara", last_name: "" },
+  { _id: "other", first_name: "Else", last_name: "Where" },
+];
+const usersCalls = (f: ReturnType<typeof fakePoster>) => f.calls.filter((c) => c.path.endsWith("getUsers")).length;
 
-test("DM names come from getFullChat titles; group titles need no lookup", async () => {
-  const f = fakePoster(dmDialogs, {}, fullChats);
+test("DM names come from one workspace users lookup; group titles are untouched", async () => {
+  const f = fakePoster(dmDialogs, {}, { users });
   const chats = await new ChatService(f.poster).listChats();
   expect(chats.map((c) => c.name)).toEqual(["علی رضا", "Sara", "Group One"]);
-  expect(fullCalls(f)).toBe(2);
+  expect(usersCalls(f)).toBe(1);
 });
 
-test("names are cached: a second listChats makes no extra getFullChat calls", async () => {
-  const f = fakePoster(dmDialogs, {}, fullChats);
+test("names are cached: a second listChats makes no extra users call", async () => {
+  const f = fakePoster(dmDialogs, {}, { users });
   const svc = new ChatService(f.poster);
   await svc.listChats();
   await svc.listChats();
-  expect(fullCalls(f)).toBe(2);
+  expect(usersCalls(f)).toBe(1);
 });
 
-test("a failed name lookup falls back to the id and is retried next time", async () => {
-  const f = fakePoster(dmDialogs, {}, { dm2: fullChats.dm2 });
+test("an unknown peer falls back to the id", async () => {
+  const f = fakePoster(dmDialogs, {}, { users: [users[0]!] });
+  expect((await new ChatService(f.poster).listChats()).map((c) => c.name)).toEqual(["علی رضا", "dm2", "Group One"]);
+});
+
+test("a failed users lookup falls back to ids and is retried next time", async () => {
+  const f = fakePoster(dmDialogs, {}, { usersFail: true });
   const svc = new ChatService(f.poster);
-  expect((await svc.listChats()).map((c) => c.name)).toEqual(["dm1", "Sara", "Group One"]);
-  expect(fullCalls(f)).toBe(2);
+  expect((await svc.listChats()).map((c) => c.name)).toEqual(["dm1", "dm2", "Group One"]);
   await svc.listChats();
-  expect(fullCalls(f)).toBe(3);
+  expect(usersCalls(f)).toBe(2);
 });
 
-test("a persistent name cache is consulted and written", async () => {
-  const store = new Map<string, string>([["dm1", "Cached Name"]]);
+test("a persistent name cache keyed by peer id is consulted and written", async () => {
+  const store = new Map<string, string>([["peer1", "Cached Name"]]);
   const names = { get: (id: string) => store.get(id), set: (id: string, n: string) => void store.set(id, n), save: async () => {} };
-  const f = fakePoster(dmDialogs, {}, fullChats);
+  const f = fakePoster(dmDialogs, {}, { users });
   const chats = await new ChatService(f.poster, { names }).listChats();
   expect(chats[0]!.name).toBe("Cached Name");
-  expect(store.get("dm2")).toBe("Sara");
-  expect(fullCalls(f)).toBe(1);
+  expect(store.get("peer2")).toBe("Sara");
+  expect(usersCalls(f)).toBe(1);
+  await new ChatService(f.poster, { names }).listChats();
+  expect(usersCalls(f)).toBe(1); // everything cached now
 });
 
-test("my own id is derived from DM participants when not configured", async () => {
+test("my own id comes from workspace userId when not configured", async () => {
   const hist = { g1: [{ ...mk(1, "x"), from: "me-id" }, { ...mk(0, "y"), from: "peer9" }] };
-  const f = fakePoster(dmDialogs, hist, fullChats);
+  const f = fakePoster(dmDialogs, hist, { users, uid: "me-id" });
   const msgs = await new ChatService(f.poster).readMessages("g1", { limit: 2 });
   expect(msgs.map((m) => m.fromMe)).toEqual([true, false]);
 });
 
-test("a configured userId skips derivation", async () => {
-  const f = fakePoster(dmDialogs, { g1: [{ ...mk(1, "x"), from: "cfg" }] }, fullChats);
+test("a configured userId skips the lookup", async () => {
+  const f = fakePoster(dmDialogs, { g1: [{ ...mk(1, "x"), from: "cfg" }] }, { users, uid: "someone-else" });
   const [m] = await new ChatService(f.poster, { userId: "cfg" }).readMessages("g1", { limit: 1 });
   expect(m!.fromMe).toBe(true);
-  expect(fullCalls(f)).toBe(2); // only the two name lookups, no extra derivation call
+  expect(f.calls.some((c) => c.path.endsWith("userId"))).toBe(false);
 });

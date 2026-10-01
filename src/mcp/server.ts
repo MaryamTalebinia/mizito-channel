@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { ChatService } from "../core/chats";
 import { MizitoError } from "../core/errors";
-import type { Message } from "../core/models";
+import { describeMessage, type Message } from "../core/models";
 import { waitForMessages } from "../core/watcher";
 
 // Verify against current Claude Code channel docs (see Task 12 preamble).
@@ -118,7 +118,7 @@ export async function startPush(server: McpServer, deps: McpDeps, signal: AbortS
           await server.server.notification({
             method: CHANNEL_METHOD,
             params: {
-              content: m.text,
+              content: describeMessage(m),
               meta: {
                 chat_id: m.chatId,
                 chat_name: m.chatName,

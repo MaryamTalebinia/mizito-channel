@@ -1,6 +1,6 @@
 import type { Poster } from "./client";
 import { AmbiguousChat, AuthError, ChatNotFound } from "./errors";
-import { type Chat, type Message, parseDialogs, parseHistory } from "./models";
+import { type Chat, type Message, parseDialogs, parseHistory, parseUserNames } from "./models";
 
 export const PAGE_SIZE = 15;
 
@@ -28,8 +28,6 @@ export interface NameCache {
   save?(): Promise<void>;
 }
 
-const NAME_LOOKUP_CONCURRENCY = 5;
-
 export interface ChatServiceOptions {
   userId?: string;
   names?: NameCache;
@@ -54,55 +52,50 @@ export class ChatService implements ChatSource {
     return chats;
   }
 
-  // Direct chats only carry the peer's id; the display name comes from getFullChat.
+  // Direct chats only carry the peer's id; names come from the workspace user list (one call).
   private async fillDmNames(chats: Chat[]): Promise<void> {
     const missing: Chat[] = [];
     for (const c of chats) {
       if (c.isGroup || !c.peerId) continue;
-      const cached = this.names.get(c.id);
+      const cached = this.names.get(c.peerId);
       if (cached) c.name = cached;
       else missing.push(c);
     }
-    let next = 0;
-    const worker = async () => {
-      while (next < missing.length) {
-        const chat = missing[next++]!;
-        try {
-          const full = (await this.client.post("/api/chat/getFullChat", { dialog: chat.id })) as { title?: unknown };
-          if (typeof full?.title === "string" && full.title) {
-            chat.name = full.title;
-            this.names.set(chat.id, full.title);
-          }
-        } catch (e) {
-          if (e instanceof AuthError) throw e;
-        }
+    if (missing.length === 0) return;
+    let byId: Map<string, string>;
+    try {
+      byId = parseUserNames(await this.client.post("/api/workspace/getUsers", {}));
+    } catch (e) {
+      if (e instanceof AuthError) throw e;
+      return;
+    }
+    for (const c of missing) {
+      const name = byId.get(c.peerId!);
+      if (name) {
+        c.name = name;
+        this.names.set(c.peerId!, name);
       }
-    };
-    await Promise.all(Array.from({ length: Math.min(NAME_LOOKUP_CONCURRENCY, missing.length) }, worker));
-    if (missing.length > 0) await this.names.save?.();
+    }
+    await this.names.save?.();
   }
 
-  // My id is the participant of any DM that is not the peer.
   private getUserId(): Promise<string | undefined> {
     if (this.opts.userId) return Promise.resolve(this.opts.userId);
-    this.myId ??= this.deriveUserId().then((id) => {
+    this.myId ??= this.fetchUserId().then((id) => {
       if (id === undefined) this.myId = undefined;
       return id;
     });
     return this.myId;
   }
 
-  private async deriveUserId(): Promise<string | undefined> {
+  private async fetchUserId(): Promise<string | undefined> {
     try {
-      for (const dm of (await this.fetchChats()).filter((c) => !c.isGroup && c.peerId).slice(0, 3)) {
-        const full = (await this.client.post("/api/chat/getFullChat", { dialog: dm.id })) as { participants?: unknown };
-        const others = Array.isArray(full?.participants) ? full.participants.filter((p) => p !== dm.peerId) : [];
-        if (others.length === 1 && typeof others[0] === "string") return others[0];
-      }
+      const r = (await this.client.post("/api/workspace/userId", {})) as { uid?: unknown };
+      return typeof r?.uid === "string" && r.uid ? r.uid : undefined;
     } catch (e) {
       if (e instanceof AuthError) throw e;
+      return undefined;
     }
-    return undefined;
   }
 
   async history(chat: Chat, offset: number): Promise<Message[]> {
