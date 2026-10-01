@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { ChatService } from "../core/chats";
 import { MizitoError } from "../core/errors";
 import { describeMessage, type Message } from "../core/models";
-import { waitForMessages } from "../core/watcher";
+import { type Batch, nextBatch, waitForMessages } from "../core/watcher";
 
 // Verify against current Claude Code channel docs (see Task 12 preamble).
 const CHANNEL_CAPABILITY = "claude/channel";
@@ -11,7 +11,12 @@ const CHANNEL_METHOD = "notifications/claude/channel";
 
 export interface McpDeps {
   chats: Pick<ChatService, "listChats" | "readMessages" | "search" | "resolveChat">;
-  watcher: { poll(): Promise<Message[]> };
+  watcher: {
+    poll(): Promise<Message[]>;
+    pollBatch?(): Promise<Batch>;
+    pollLeased?(): Promise<Message[]>;
+    releaseLease?(): void;
+  };
   send: (chatId: string, text: string) => Promise<void>;
   allowSend: boolean;
   push: boolean;
@@ -80,13 +85,17 @@ export function createMcpServer(deps: McpDeps): McpServer {
         inputSchema: { timeout_seconds: z.number().int().min(1).max(120).optional() },
         annotations: readOnly,
       },
-      ({ timeout_seconds }) =>
-        guard(() =>
-          waitForMessages(deps.watcher, {
-            timeoutMs: (timeout_seconds ?? 30) * 1000,
-            intervalMs: deps.pollIntervalMs,
-          }),
-        ),
+      ({ timeout_seconds }, extra) =>
+        guard(async () => {
+          const w = deps.watcher;
+          const msgs = await waitForMessages(
+            { poll: () => (w.pollLeased ? w.pollLeased() : w.poll()) },
+            { timeoutMs: (timeout_seconds ?? 30) * 1000, intervalMs: deps.pollIntervalMs },
+          );
+          // If the client cancelled, it never saw these; discard the lease so they are redelivered.
+          if (extra.signal?.aborted) w.releaseLease?.();
+          return msgs;
+        }),
     );
   }
 
@@ -115,7 +124,8 @@ export async function startPush(server: McpServer, deps: McpDeps, signal: AbortS
   void (async () => {
     while (!signal.aborted) {
       try {
-        for (const m of await deps.watcher.poll()) {
+        const batch = await nextBatch(deps.watcher);
+        for (const m of batch.messages) {
           if (m.fromMe || (deps.pushChatIds && !deps.pushChatIds.has(m.chatId))) continue;
           await server.server.notification({
             method: CHANNEL_METHOD,
@@ -131,6 +141,7 @@ export async function startPush(server: McpServer, deps: McpDeps, signal: AbortS
             },
           });
         }
+        await batch.commit();
       } catch (e) {
         console.error("mizito push poll failed:", e instanceof Error ? e.message : e);
       }

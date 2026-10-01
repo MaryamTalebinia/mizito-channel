@@ -169,3 +169,45 @@ test("push only forwards allowlisted chats and never my own messages", async () 
   await new Promise((r) => setTimeout(r, 10));
   expect(got.map((n) => n.params.content)).toEqual(["keep"]);
 });
+
+test("wait_for_messages uses the leased poll when the watcher offers one", async () => {
+  let leased = 0;
+  const d = deps({ watcher: { poll: async () => [], pollLeased: async () => { leased++; return [msg(7, { text: "leased" })]; } } });
+  const { client } = await connect(d);
+  const r = await client.callTool({ name: "wait_for_messages", arguments: { timeout_seconds: 1 } });
+  expect(JSON.parse(textOf(r))[0].text).toBe("leased");
+  expect(leased).toBe(1);
+});
+
+test("push commits the batch only after every notification was delivered", async () => {
+  const d = deps({ push: true });
+  const { server } = await connect(d);
+  const ac = new AbortController();
+  let commits = 0;
+  let polls = 0;
+  d.watcher.pollBatch = async () =>
+    ++polls === 1 ? { messages: [msg(1, { text: "a" })], commit: async () => { commits++; } } : (ac.abort(), { messages: [], commit: async () => {} });
+  await startPush(server, d, ac.signal);
+  await new Promise((r) => setTimeout(r, 30));
+  ac.abort();
+  expect(commits).toBe(1);
+});
+
+test("push does not commit when a notification fails, so the batch is retried", async () => {
+  const d = deps({ push: true });
+  const { server } = await connect(d);
+  (server.server as any).notification = async () => { throw new Error("transport closed"); };
+  const ac = new AbortController();
+  let commits = 0;
+  let polls = 0;
+  d.watcher.pollBatch = async () =>
+    ++polls <= 2 ? { messages: [msg(1, { text: "a" })], commit: async () => { commits++; } } : (ac.abort(), { messages: [], commit: async () => {} });
+  const orig = console.error;
+  console.error = () => {};
+  await startPush(server, d, ac.signal);
+  await new Promise((r) => setTimeout(r, 30));
+  console.error = orig;
+  ac.abort();
+  expect(commits).toBe(0);
+  expect(polls).toBeGreaterThanOrEqual(2); // retried
+});

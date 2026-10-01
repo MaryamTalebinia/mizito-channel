@@ -152,3 +152,26 @@ test("--limit must be a positive whole number", async () => {
   expect(await h.run(["read", "Ata", "--limit", "2.5"])).toBe(64);
   expect(await h.run(["read", "Ata", "--limit", "3"])).toBe(0);
 });
+
+test("watch commits each batch only after printing it", async () => {
+  const ac = new AbortController();
+  const order: string[] = [];
+  let n = 0;
+  const h = harness(
+    {
+      watcher: () => ({
+        poll: async () => [],
+        pollBatch: async () => {
+          if (++n === 1) return { messages: [msg(1, { text: "ping" })], commit: async () => { order.push("commit"); } };
+          ac.abort();
+          return { messages: [], commit: async () => {} };
+        },
+      }),
+    },
+    ac.signal,
+  );
+  const out = h.out;
+  expect(await h.run(["watch", "--json"])).toBe(0);
+  expect(out.filter((l) => l.startsWith("{"))).toHaveLength(1);
+  expect(order).toEqual(["commit"]);
+});

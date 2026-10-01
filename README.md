@@ -156,12 +156,16 @@ Delivery behaviour:
 
 - The first run **baselines** existing history and delivers nothing. Only messages that arrive
   afterwards are delivered.
-- Progress is saved per chat, so after a restart you receive what arrived while you were away, each
-  message once. Don't run `watch` and `mcp` at the same time; they share the same progress file.
+- Progress is saved per chat. After a restart you receive what arrived while you were away.
+- Only one watcher can run per `MIZITO_HOME`: `watch`, the push mode and `wait_for_messages` take a
+  lock (`watcher.lock`) on first use, and a second one refuses with a clear error. Read-only tools
+  (`list_chats`, `read_messages`, `search_chat`) never take it, so several sessions can read at once.
 - Deleted messages, edits to old messages, and service notices are not delivered as new messages.
-- Delivery is at-most-once: progress is recorded when a batch is fetched, so if the consumer fails
-  mid-batch (for example a dropped notification) those messages are not retried. A failed write of
-  the progress file does not lose the batch.
+- Delivery is **at-least-once**: a batch is recorded as delivered only after the consumer has it, so
+  a failure retries instead of losing messages. `watch` records a batch after printing it; push
+  records it after every notification was sent; `wait_for_messages` records the previous batch when
+  called again, and discards it if the client cancelled the call. After a crash or failure the same
+  message can arrive twice, so dedupe on the message `id` if that matters.
 
 ## Sending
 
@@ -195,6 +199,7 @@ Everything lives in `MIZITO_HOME` (default `~/.config/mizito`), created with mod
 | `cursors.json` | Per-chat progress for new-message delivery. |
 | `names.json` | Cached display names for direct chats. |
 | `logins.json` | Timestamps of recent logins, used by the login throttle. |
+| `watcher.lock` | Pid of the running watcher; removed on exit, stale locks are taken over. |
 
 - Use a consistent `MIZITO_HOME`. Pointing it at a fresh directory discards the cached token and
   forces a new login.

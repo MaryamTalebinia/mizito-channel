@@ -1,11 +1,12 @@
 import { parseArgs } from "node:util";
 import type { ChatService } from "../core/chats";
+import { type Batch, nextBatch } from "../core/watcher";
 import { MizitoError } from "../core/errors";
 import { describeMessage, type Message } from "../core/models";
 
 export interface CliDeps {
   chats: Pick<ChatService, "listChats" | "resolveChat" | "readMessages" | "search">;
-  watcher: () => { poll(): Promise<Message[]> };
+  watcher: () => { poll(): Promise<Message[]>; pollBatch?(): Promise<Batch> };
   send: (chatId: string, text: string) => Promise<void>;
   login: () => Promise<void>;
   startMcp: () => Promise<void>;
@@ -66,7 +67,9 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
         const watcher = deps.watcher();
         const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
         while (!io.signal?.aborted) {
-          for (const m of await watcher.poll()) io.out(json ? JSON.stringify(m) : fmt(m));
+          const batch = await nextBatch(watcher);
+          for (const m of batch.messages) io.out(json ? JSON.stringify(m) : fmt(m));
+          await batch.commit();
           if (io.signal?.aborted) break;
           await sleep(deps.pollIntervalMs);
         }

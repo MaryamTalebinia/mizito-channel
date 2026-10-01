@@ -198,3 +198,59 @@ test("a failing cursor save does not drop the batch", async () => {
   cursors.save = async () => { throw new Error("disk full"); };
   expect((await w.poll()).map((m) => m.index)).toEqual([1]);
 });
+
+test("a batch is not recorded until commit, and an uncommitted batch is redelivered", async () => {
+  const { chats, open } = await setup();
+  chats.addChat("c1", [old(0)]);
+  const w = await open();
+  await w.poll();
+  chats.add("c1", fresh(1));
+  const b1 = await w.pollBatch();
+  expect(b1.messages.map((m) => m.index)).toEqual([1]);
+  const b2 = await w.pollBatch(); // consumer failed: never committed b1
+  expect(b2.messages.map((m) => m.index)).toEqual([1]);
+  await b2.commit();
+  await b2.commit(); // idempotent
+  expect((await w.pollBatch()).messages).toEqual([]);
+});
+
+test("an uncommitted batch survives a restart and is redelivered once committed", async () => {
+  const { chats, open } = await setup();
+  chats.addChat("c1", [old(0)]);
+  const w1 = await open();
+  await w1.poll();
+  chats.add("c1", fresh(1));
+  await w1.pollBatch(); // crash before commit
+  const w2 = await open();
+  const b = await w2.pollBatch();
+  expect(b.messages.map((m) => m.index)).toEqual([1]);
+  await b.commit();
+  expect((await (await open()).poll())).toEqual([]);
+});
+
+test("pollLeased acknowledges the previous batch on the next call; releaseLease redelivers", async () => {
+  const { chats, open } = await setup();
+  chats.addChat("c1", [old(0)]);
+  const w = await open();
+  await w.poll();
+  chats.add("c1", fresh(1));
+  expect((await w.pollLeased()).map((m) => m.index)).toEqual([1]);
+  expect((await w.pollLeased()).map((m) => m.index)).toEqual([]); // acked the first batch
+  chats.add("c1", fresh(2));
+  expect((await w.pollLeased()).map((m) => m.index)).toEqual([2]);
+  w.releaseLease(); // the consumer never received batch [2]
+  expect((await w.pollLeased()).map((m) => m.index)).toEqual([2]);
+});
+
+test("the watcher lock is acquired once on first poll, and a refusal propagates", async () => {
+  const { chats } = await setup();
+  chats.addChat("c1", [old(0)]);
+  const path = join(await mkdtemp(join(tmpdir(), "mizito-")), "cursors.json");
+  let acquired = 0;
+  const w = new Watcher({ chats, cursors: await CursorStore.open(path), now: () => NOW, lock: { acquire: async () => { acquired++; } } });
+  await w.poll();
+  await w.poll();
+  expect(acquired).toBe(1);
+  const blocked = new Watcher({ chats, cursors: await CursorStore.open(path), now: () => NOW, lock: { acquire: async () => { throw new Error("locked"); } } });
+  await expect(blocked.poll()).rejects.toThrow("locked");
+});

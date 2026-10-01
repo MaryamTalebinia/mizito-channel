@@ -5,6 +5,7 @@ import { login as doLogin } from "../core/auth";
 import { ChatService } from "../core/chats";
 import { MizitoClient } from "../core/client";
 import { loadConfig } from "../core/config";
+import { PidLock } from "../core/lock";
 import { ConfigError } from "../core/errors";
 import { CursorStore } from "../core/cursor";
 import { sendMessage } from "../core/send";
@@ -69,9 +70,9 @@ async function main(): Promise<number> {
 
   const names = await FileNameCache.open(join(config.home, "names.json"));
   const chats = new ChatService(client, { userId: config.userId, names });
-  const makeWatcher = async () =>
-    new Watcher({ chats, cursors: await CursorStore.open(join(config.home, "cursors.json")) });
-  const watcher = await makeWatcher();
+  const lock = new PidLock(join(config.home, "watcher.lock"));
+  process.on("exit", () => lock.release());
+  const watcher = new Watcher({ chats, cursors: await CursorStore.open(join(config.home, "cursors.json")), lock });
   const send = (chatId: string, text: string) =>
     sendMessage(client, chatId, text, { allowSend: config.allowSend, userId: config.userId });
 
