@@ -51,6 +51,9 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
       case "read": {
         need(1, "read <chat> [--limit N] [--json]");
         const limit = values.limit !== undefined ? Number(values.limit) : undefined;
+        if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+          throw new Usage("--limit must be a positive whole number");
+        }
         printMessages(await deps.chats.readMessages(rest[0]!, limit ? { limit } : {}));
         return 0;
       }

@@ -57,3 +57,19 @@ test("other HTTP errors and fetch failures become NetworkError", async () => {
   const c2 = new MizitoClient({ credentials, baseUrl: "https://x", fetch: scriptedFetch([() => { throw new Error("down"); }]), token: "T" });
   await expect(c2.post("/api/x")).rejects.toBeInstanceOf(NetworkError);
 });
+
+test("beforeLogin runs before every login, and its failure prevents the login request", async () => {
+  let calls = 0;
+  const f = scriptedFetch([json({ status: 1, token: "T" }), json({ ok: 1 })]);
+  const c = new MizitoClient({ credentials, baseUrl: "https://x", fetch: f, beforeLogin: async () => { calls++; } });
+  await c.post("/api/x");
+  expect(calls).toBe(1);
+
+  const f2 = scriptedFetch([]);
+  const blocked = new MizitoClient({
+    credentials, baseUrl: "https://x", fetch: f2,
+    beforeLogin: async () => { throw new AuthError("Login throttled"); },
+  });
+  await expect(blocked.post("/api/x")).rejects.toBeInstanceOf(AuthError);
+  expect(f2.calls).toHaveLength(0);
+});

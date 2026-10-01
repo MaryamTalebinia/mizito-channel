@@ -15,6 +15,7 @@ export interface McpDeps {
   send: (chatId: string, text: string) => Promise<void>;
   allowSend: boolean;
   push: boolean;
+  pushChatIds?: Set<string>;
   pollIntervalMs: number;
 }
 
@@ -115,6 +116,7 @@ export async function startPush(server: McpServer, deps: McpDeps, signal: AbortS
     while (!signal.aborted) {
       try {
         for (const m of await deps.watcher.poll()) {
+          if (m.fromMe || (deps.pushChatIds && !deps.pushChatIds.has(m.chatId))) continue;
           await server.server.notification({
             method: CHANNEL_METHOD,
             params: {

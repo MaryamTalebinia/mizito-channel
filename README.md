@@ -8,7 +8,8 @@ receive new messages. Sending is possible but **off by default**.
 > uses (`https://app.mizito.ir`), signed in as *your own account*. It can break without notice, and
 > automating login may conflict with Mizito's terms. Use it only with your own account and keep
 > request rates low. Repeated logins can get an account flagged, so this tool caches the session
-> token and logs in again only when the server rejects it.
+> token, logs in again only when the server rejects it, and **refuses to log in more than 3 times in
+> 10 minutes** (tracked in `logins.json`).
 
 ## Contents
 
@@ -51,7 +52,8 @@ Examples below use `mizito` for whichever you run (`bun src/cli/main.ts` or `./d
 | `mizito mcp` | Starts the stdio MCP server. |
 
 **Naming a chat.** `<chat>` is a chat id or a chat name. Names are matched ignoring case, Arabic vs
-Persian letter forms (`ي`/`ی`, `ك`/`ک`), Arabic-Indic vs Persian digits, and ZWNJ (half-space).
+Persian letter forms (`ي`/`ی`, `ك`/`ک`, `ى`), Arabic-Indic vs Persian digits, and all spaces and ZWNJ
+(half-space), so `علیرضا` finds `علی‌رضا`.
 Reading and searching accept a unique partial name; if several chats match you get an error listing
 them. `send` requires an **exact** id or name so a message can't go to the wrong chat.
 
@@ -121,8 +123,9 @@ guarantee: don't give an agent that reads chats powerful tools unless you trust 
 ```
 
 - `date` is milliseconds since the epoch. `index` is the chat's running message number.
-- `fromMe` marks your own messages so an agent can ignore them. `fromName` is `"me"` for you, the
-  other person's name in direct chats, and absent in groups (only the sender id is available).
+- `fromMe` marks your own messages so an agent can ignore them. `fromName` is `"me"` for you and
+  otherwise the sender's name from the workspace user list, in groups as well as direct chats. It is
+  absent only for senders not in that list (for example removed users); `from` always has the id.
 - Attachments are described, not downloaded. A message with only an attachment has empty `text`;
   the text/CLI views show it as `[photo: a.jpg]`. Kinds seen: `photo`, `video`, `document`, `audio`,
   `taskSchedule`, `mentionInTask`, `mentionInChat`.
@@ -143,9 +146,11 @@ and fetches history only for chats that changed:
    MIZITO_PUSH=1 claude --dangerously-load-development-channels server:mizito
    ```
 
-   > **Push mode delivers messages from every chat and every sender into your session.** Claude
-   > Code's channel docs require gating inbound messages on sender identity to prevent prompt
-   > injection, and this version has no allowlist yet. Prefer `wait_for_messages` until one exists.
+   Push mode **requires an allowlist**: set `MIZITO_PUSH_CHATS` to comma-separated chat ids or exact
+   names, and only those chats are pushed (your own messages never are). The server refuses to start
+   without it. The allowlist is per chat, not per sender, so everyone in an allowlisted group can
+   put text in front of your agent. Claude Code's channel docs recommend gating on sender identity;
+   only allowlist chats whose members you trust.
 
 Delivery behaviour:
 
@@ -154,8 +159,9 @@ Delivery behaviour:
 - Progress is saved per chat, so after a restart you receive what arrived while you were away, each
   message once. Don't run `watch` and `mcp` at the same time; they share the same progress file.
 - Deleted messages, edits to old messages, and service notices are not delivered as new messages.
-- Delivery is at-most-once: if saving progress or the consumer fails mid-batch, that batch is not
-  retried.
+- Delivery is at-most-once: progress is recorded when a batch is fetched, so if the consumer fails
+  mid-batch (for example a dropped notification) those messages are not retried. A failed write of
+  the progress file does not lose the batch.
 
 ## Sending
 
@@ -172,7 +178,8 @@ with yourself first.
 | `MIZITO_USERNAME`, `MIZITO_PASSWORD` | – | Credentials. Override the saved file. |
 | `MIZITO_USER_ID` | derived | Your own user id. Normally not needed; it is fetched automatically. |
 | `MIZITO_ALLOW_SEND` | off | `1` enables sending. Any other value leaves it off. |
-| `MIZITO_PUSH` | off | `1` makes `mizito mcp` push channel notifications. |
+| `MIZITO_PUSH` | off | `1` makes `mizito mcp` push channel notifications. Needs `MIZITO_PUSH_CHATS`. |
+| `MIZITO_PUSH_CHATS` | – | Comma-separated chat ids or exact names allowed to be pushed. |
 | `MIZITO_POLL_MS` | `3000` | Poll interval for new messages, in milliseconds. |
 | `MIZITO_HOME` | `~/.config/mizito` | Directory for saved state. |
 | `MIZITO_BASE_URL` | `https://app.mizito.ir` | Backend base URL. |
@@ -187,6 +194,7 @@ Everything lives in `MIZITO_HOME` (default `~/.config/mizito`), created with mod
 | `session.json` | Cached session token, reused across runs so each command doesn't log in again. |
 | `cursors.json` | Per-chat progress for new-message delivery. |
 | `names.json` | Cached display names for direct chats. |
+| `logins.json` | Timestamps of recent logins, used by the login throttle. |
 
 - Use a consistent `MIZITO_HOME`. Pointing it at a fresh directory discards the cached token and
   forces a new login.
@@ -212,9 +220,8 @@ Everything lives in `MIZITO_HOME` (default `~/.config/mizito`), created with mod
   socket.io; using it is not implemented yet.
 - The first poll after a fresh start fetches one page per chat, which takes several seconds for
   large accounts.
-- Group messages carry only the sender's id, not a name.
 - Single account and workspace; no media download, replies, reactions or read receipts.
-- No Keychain storage, no sender/chat allowlist for push mode, and no login throttle yet.
+- No Keychain storage, and the push allowlist is per chat rather than per sender.
 
 ## Development
 

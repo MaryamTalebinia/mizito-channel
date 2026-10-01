@@ -5,11 +5,12 @@ import { login as doLogin } from "../core/auth";
 import { ChatService } from "../core/chats";
 import { MizitoClient } from "../core/client";
 import { loadConfig } from "../core/config";
+import { ConfigError } from "../core/errors";
 import { CursorStore } from "../core/cursor";
 import { sendMessage } from "../core/send";
-import { FileCredentialStore, FileNameCache, FileTokenStore, loadCredentials } from "../core/stores";
+import { FileCredentialStore, FileNameCache, FileTokenStore, LoginThrottle, loadCredentials } from "../core/stores";
 import { Watcher } from "../core/watcher";
-import { createMcpServer, startPush } from "../mcp/server";
+import { type McpDeps, createMcpServer, startPush } from "../mcp/server";
 import { runCli } from "./run";
 
 async function readLine(prompt: string, hidden: boolean): Promise<string> {
@@ -29,7 +30,10 @@ async function readLine(prompt: string, hidden: boolean): Promise<string> {
           process.stderr.write("\n");
           return resolve(line);
         }
-        if (ch === "\u0003") process.exit(130);
+        if (ch === "\u0003") {
+          if (hidden && stdin.isTTY) stdin.setRawMode(false);
+          process.exit(130);
+        }
         if (ch === "\u007f") line = line.slice(0, -1);
         else line += ch;
       }
@@ -45,6 +49,7 @@ async function main(): Promise<number> {
 
   // A cached token works without credentials; credentials are only needed if a
   // login happens. Missing credentials surface as the original AuthError then.
+  const throttle = new LoginThrottle(join(config.home, "logins.json"));
   let credError: unknown;
   const credentials = await loadCredentials(process.env, credStore).catch((e) => {
     credError = e;
@@ -55,6 +60,7 @@ async function main(): Promise<number> {
     credentials,
     token: await tokenStore.get(),
     onToken: (t) => tokenStore.set(t),
+    beforeLogin: () => throttle.check(),
     fetch: (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
       if (credError && String(url).endsWith("/capi/session/create")) throw credError;
       return fetch(url, init);
@@ -69,7 +75,7 @@ async function main(): Promise<number> {
   const send = (chatId: string, text: string) =>
     sendMessage(client, chatId, text, { allowSend: config.allowSend, userId: config.userId });
 
-  const mcpDeps = {
+  const mcpDeps: McpDeps = {
     chats,
     watcher,
     send,
@@ -89,12 +95,19 @@ async function main(): Promise<number> {
     login: async () => {
       const username = process.env.MIZITO_USERNAME ?? (await readLine("Mizito username: ", false));
       const password = process.env.MIZITO_PASSWORD ?? (await readLine("Mizito password: ", true));
+      await throttle.check();
       const token = await doLogin(fetch, config.baseUrl, { username, password });
       await credStore.set({ username, password });
       await tokenStore.set(token);
       console.error(`Logged in. Credentials saved to ${config.home} (mode 0600).`);
     },
     startMcp: async () => {
+      if (mcpDeps.push) {
+        if (config.pushChats.length === 0) {
+          throw new ConfigError("MIZITO_PUSH=1 requires MIZITO_PUSH_CHATS (comma-separated chat ids or exact names to push)");
+        }
+        mcpDeps.pushChatIds = new Set((await Promise.all(config.pushChats.map((c) => chats.resolveChat(c, { exact: true })))).map((c) => c.id));
+      }
       const server = createMcpServer(mcpDeps);
       await server.connect(new StdioServerTransport());
       if (mcpDeps.push) await startPush(server, mcpDeps, ac.signal);

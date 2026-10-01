@@ -14,6 +14,7 @@ export function normalizeName(s: string): string {
     .normalize("NFKC")
     .replace(/ي/g, "ی")
     .replace(/ك/g, "ک")
+    .replace(/ى/g, "ی")
     .replace(/[‌​]/g, " ")
     .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
     .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
@@ -33,9 +34,15 @@ export interface ChatServiceOptions {
   names?: NameCache;
 }
 
+// Comparison key for chat names: also ignores every space and ZWNJ ("علیرضا" == "علی‌رضا").
+const matchKey = (s: string) => normalizeName(s).replace(/ /g, "");
+
+const USERS_TTL_MS = 10 * 60 * 1000;
+
 export class ChatService implements ChatSource {
   private readonly names: NameCache;
   private myId?: Promise<string | undefined>;
+  private users?: { at: number; map: Promise<Map<string, string>> };
 
   constructor(private readonly client: Poster, private readonly opts: ChatServiceOptions = {}) {
     const mem = new Map<string, string>();
@@ -62,13 +69,7 @@ export class ChatService implements ChatSource {
       else missing.push(c);
     }
     if (missing.length === 0) return;
-    let byId: Map<string, string>;
-    try {
-      byId = parseUserNames(await this.client.post("/api/workspace/getUsers", {}));
-    } catch (e) {
-      if (e instanceof AuthError) throw e;
-      return;
-    }
+    const byId = await this.userNames();
     for (const c of missing) {
       const name = byId.get(c.peerId!);
       if (name) {
@@ -77,6 +78,21 @@ export class ChatService implements ChatSource {
       }
     }
     await this.names.save?.();
+  }
+
+  // Workspace user names by id, fetched at most once per TTL. Failures give an empty map (retried next call).
+  private async userNames(): Promise<Map<string, string>> {
+    if (!this.users || Date.now() - this.users.at > USERS_TTL_MS) {
+      const map = this.client.post("/api/workspace/getUsers", {}).then(parseUserNames);
+      this.users = { at: Date.now(), map };
+    }
+    try {
+      return await this.users.map;
+    } catch (e) {
+      this.users = undefined;
+      if (e instanceof AuthError) throw e;
+      return new Map();
+    }
   }
 
   private getUserId(): Promise<string | undefined> {
@@ -100,16 +116,17 @@ export class ChatService implements ChatSource {
 
   async history(chat: Chat, offset: number): Promise<Message[]> {
     const raw = await this.client.post("/api/chat/getHistory", { dialog: chat.id, offset });
-    return parseHistory(raw, chat, await this.getUserId());
+    const users = await this.userNames();
+    return parseHistory(raw, chat, await this.getUserId(), (id) => users.get(id));
   }
 
   async resolveChat(ref: string, o: { exact?: boolean } = {}): Promise<Chat> {
     const chats = await this.listChats();
     const byId = chats.find((c) => c.id === ref);
     if (byId) return byId;
-    const q = normalizeName(ref);
-    const exact = chats.filter((c) => normalizeName(c.name) === q);
-    const partial = o.exact ? [] : chats.filter((c) => normalizeName(c.name).includes(q));
+    const q = matchKey(ref);
+    const exact = chats.filter((c) => matchKey(c.name) === q);
+    const partial = o.exact ? [] : chats.filter((c) => matchKey(c.name).includes(q));
     const pool = exact.length > 0 ? exact : partial;
     if (pool.length === 0) throw new ChatNotFound(ref);
     if (pool.length > 1) throw new AmbiguousChat(ref, pool.map((c) => c.name));
@@ -132,13 +149,13 @@ export class ChatService implements ChatSource {
 
   async search(ref: string, query: string, maxPages = 20): Promise<Message[]> {
     const chat = await this.resolveChat(ref);
-    const q = normalizeName(query);
+    const q = matchKey(query);
     const hits: Message[] = [];
     let offset = 0;
     for (let page = 0; page < maxPages; page++) {
       const batch = await this.history(chat, offset);
       if (batch.length === 0) break;
-      hits.push(...batch.filter((m) => normalizeName(m.text).includes(q)));
+      hits.push(...batch.filter((m) => matchKey(m.text).includes(q)));
       offset += batch.length;
     }
     return hits;

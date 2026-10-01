@@ -82,3 +82,30 @@ export class FileNameCache {
     return writePrivateJson(this.path, this.data);
   }
 }
+
+export interface LoginThrottleOptions {
+  max?: number;
+  windowMs?: number;
+  now?: () => number;
+}
+
+// Refuses to log in more than `max` times per window, so a bug or loop can't hammer the login endpoint.
+export class LoginThrottle {
+  constructor(private readonly path: string, private readonly o: LoginThrottleOptions = {}) {}
+
+  async check(): Promise<void> {
+    const now = (this.o.now ?? Date.now)();
+    const windowMs = this.o.windowMs ?? 10 * 60 * 1000;
+    const max = this.o.max ?? 3;
+    const stored = (await readJson(this.path))?.times;
+    const times = (Array.isArray(stored) ? stored : []).filter((t): t is number => typeof t === "number" && now - t < windowMs);
+    if (times.length >= max) {
+      throw new AuthError(
+        `Login throttled: ${max} logins in the last ${Math.round(windowMs / 60000)} minutes. ` +
+          "Wait before trying again, or the account may be flagged.",
+      );
+    }
+    times.push(now);
+    await writePrivateJson(this.path, { times });
+  }
+}

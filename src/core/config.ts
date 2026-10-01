@@ -7,6 +7,7 @@ export interface Config {
   allowSend: boolean;
   userId?: string;
   pollIntervalMs: number;
+  pushChats: string[];
 }
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
@@ -17,5 +18,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     allowSend: env.MIZITO_ALLOW_SEND === "1",
     userId: env.MIZITO_USER_ID || undefined,
     pollIntervalMs: poll > 0 ? poll : 3000,
+    pushChats: (env.MIZITO_PUSH_CHATS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   };
 }

@@ -179,3 +179,28 @@ test("a configured userId skips the lookup", async () => {
   expect(m!.fromMe).toBe(true);
   expect(f.calls.some((c) => c.path.endsWith("userId"))).toBe(false);
 });
+
+test("group messages show sender names from the workspace users", async () => {
+  const hist = { g1: [{ ...mk(2, "a"), from: "peer1" }, { ...mk(1, "b"), from: "peer2" }, { ...mk(0, "c"), from: "stranger" }] };
+  const f = fakePoster(dmDialogs, hist, { users, uid: "me" });
+  const svc = new ChatService(f.poster);
+  const msgs = await svc.readMessages("g1", { limit: 3 });
+  expect(msgs.map((m) => m.fromName)).toEqual(["علی رضا", "Sara", undefined]);
+  await svc.readMessages("g1", { limit: 3 });
+  expect(usersCalls(f)).toBe(1);
+});
+
+test("a failed users lookup leaves group sender names unset instead of failing the read", async () => {
+  const f = fakePoster(dmDialogs, { g1: [{ ...mk(1, "a"), from: "peer1" }] }, { usersFail: true, uid: "me" });
+  const [m] = await new ChatService(f.poster).readMessages("g1", { limit: 1 });
+  expect(m!.fromName).toBeUndefined();
+  expect(m!.from).toBe("peer1");
+});
+
+test("matching ignores spaces and ZWNJ entirely and folds alef maksura", async () => {
+  const svc = new ChatService(fakePoster([{ _id: "x", is_group: true, title: "علی‌رضا" }], {}).poster);
+  expect((await svc.resolveChat("علیرضا")).id).toBe("x");
+  expect((await svc.resolveChat("علی رضا")).id).toBe("x");
+  expect((await svc.resolveChat("علیرضا", { exact: true })).id).toBe("x");
+  expect(normalizeName("مصطفى")).toBe(normalizeName("مصطفی"));
+});

@@ -11,6 +11,7 @@ export interface ClientOptions {
   fetch?: typeof fetch;
   token?: string;
   onToken?: (token: string) => void | Promise<void>;
+  beforeLogin?: () => Promise<void>;
 }
 
 export class MizitoClient implements Poster {
@@ -42,6 +43,7 @@ export class MizitoClient implements Poster {
   }
 
   private async relogin(): Promise<void> {
+    await this.opts.beforeLogin?.();
     this.token = await login(this.f, this.baseUrl, this.opts.credentials);
     await this.opts.onToken?.(this.token);
   }

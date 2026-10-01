@@ -25,3 +25,8 @@ test("collapses runs of blank lines and trims", () => {
 test("empty input gives empty string", () => {
   expect(htmlToText("")).toBe("");
 });
+
+test("decodes numeric entities and leaves invalid ones alone", () => {
+  expect(htmlToText("&#1587;&#x1F600;&#38;")).toBe("س😀&");
+  expect(htmlToText("&#99999999; ok")).toBe("&#99999999; ok");
+});

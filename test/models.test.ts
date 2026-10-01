@@ -128,3 +128,15 @@ test("describeMessage shows text, or a bracketed attachment when there is no tex
   expect(describeMessage(b!)).toBe("[document: r.pdf]");
   expect(describeMessage(c!)).toBe("[audio]");
 });
+
+test("parseHistory uses a name resolver for senders, including in groups", () => {
+  const nameOf = (id: string) => ({ u2: "Sara", u3: "Reza" } as Record<string, string>)[id];
+  const msgs = parseHistory([rawMsg({ from: "u2" }), rawMsg({ _id: "m2", from: "u3" }), rawMsg({ _id: "m3", from: "u9" })], group, "u1", nameOf);
+  expect(msgs.map((m) => m.fromName)).toEqual(["Sara", "Reza", undefined]);
+});
+
+test("a name resolver never overrides me, and DMs still fall back to the chat name", () => {
+  const nameOf = () => "Someone";
+  expect(parseHistory([rawMsg({ from: "u1" })], group, "u1", nameOf)[0]!.fromName).toBe("me");
+  expect(parseHistory([rawMsg()], dm, "u1", () => undefined)[0]!.fromName).toBe("Ata");
+});

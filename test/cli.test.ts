@@ -144,3 +144,11 @@ test("read shows attachment-only messages as a bracketed description", async () 
   await h.run(["read", "Ata"]);
   expect(h.out.join("\n")).toContain("[photo: a.jpg]");
 });
+
+test("--limit must be a positive whole number", async () => {
+  const h = harness();
+  expect(await h.run(["read", "Ata", "--limit", "abc"])).toBe(64);
+  expect(await h.run(["read", "Ata", "--limit", "0"])).toBe(64);
+  expect(await h.run(["read", "Ata", "--limit", "2.5"])).toBe(64);
+  expect(await h.run(["read", "Ata", "--limit", "3"])).toBe(0);
+});

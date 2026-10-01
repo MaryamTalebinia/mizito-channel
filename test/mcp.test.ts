@@ -149,3 +149,23 @@ test("push content falls back to an attachment description when there is no text
   await new Promise((r) => setTimeout(r, 10));
   expect(got[0].params.content).toBe("[photo: a.jpg]");
 });
+
+test("push only forwards allowlisted chats and never my own messages", async () => {
+  const d = deps({ push: true, pushChatIds: new Set(["c1"]) });
+  const { server, client } = await connect(d);
+  const got: any[] = [];
+  client.fallbackNotificationHandler = async (n) => { got.push(n); };
+  const ac = new AbortController();
+  let polls = 0;
+  d.watcher.poll = async () =>
+    ++polls === 1
+      ? [
+          msg(1, { chatId: "c1", text: "keep" }),
+          msg(2, { chatId: "c2", text: "other chat" }),
+          msg(3, { chatId: "c1", text: "mine", fromMe: true }),
+        ]
+      : (ac.abort(), []);
+  await startPush(server, d, ac.signal);
+  await new Promise((r) => setTimeout(r, 10));
+  expect(got.map((n) => n.params.content)).toEqual(["keep"]);
+});

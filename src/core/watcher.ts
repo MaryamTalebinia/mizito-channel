@@ -39,7 +39,12 @@ export class Watcher {
       }
     }
     if (chats.length > 0 && errors.length === chats.length) throw errors[0];
-    await this.deps.cursors.save();
+    try {
+      await this.deps.cursors.save();
+    } catch (e) {
+      // Progress is still held in memory; don't drop the batch because the disk write failed.
+      console.error("mizito: could not save cursors:", e instanceof Error ? e.message : e);
+    }
     this.firstPoll = false;
     return out.sort((a, b) => a.date - b.date || a.index - b.index);
   }

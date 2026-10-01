@@ -25,3 +25,8 @@ test("poll interval ignores junk values", () => {
   expect(loadConfig({ MIZITO_POLL_MS: "abc" }).pollIntervalMs).toBe(3000);
   expect(loadConfig({ MIZITO_POLL_MS: "-5" }).pollIntervalMs).toBe(3000);
 });
+
+test("MIZITO_PUSH_CHATS is a trimmed comma-separated list", () => {
+  expect(loadConfig({}).pushChats).toEqual([]);
+  expect(loadConfig({ MIZITO_PUSH_CHATS: " Team , 69aa ,," }).pushChats).toEqual(["Team", "69aa"]);
+});

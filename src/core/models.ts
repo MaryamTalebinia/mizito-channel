@@ -145,6 +145,7 @@ export function parseHistory(
   data: unknown,
   chat: Pick<Chat, "id" | "name" | "isGroup">,
   userId?: string,
+  nameOf?: (id: string) => string | undefined,
 ): Message[] {
   return parse("chat/getHistory", HistoryResponse, data).map((m) => {
     const from = refId(m.from) ?? "";
@@ -156,7 +157,7 @@ export function parseHistory(
       chatName: chat.name,
       index: m.msg_index,
       from,
-      fromName: fromMe ? "me" : chat.isGroup ? undefined : chat.name,
+      fromName: fromMe ? "me" : nameOf?.(from) ?? (chat.isGroup ? undefined : chat.name),
       fromMe,
       date: m.date,
       text: htmlToText(m.message ?? ""),
