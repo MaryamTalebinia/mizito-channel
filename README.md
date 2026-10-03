@@ -50,13 +50,14 @@ Examples below use `mizito` for whichever you run (`bun src/cli/main.ts` or `./d
 | `mizito watch [--json]` | Streams new messages from all chats until Ctrl-C. With `--json`, one JSON object per line. |
 | `mizito hermes-watch` | Durably forwards incoming messages to a signed Hermes webhook. Requires `HERMES_WEBHOOK_URL` and `HERMES_WEBHOOK_SECRET`. |
 | `mizito send <chat> <text>` | Sends a message as you. Refused unless `MIZITO_ALLOW_SEND=1`. |
+| `mizito send-files <chat> <path...> [--text <caption>]` | Uploads and sends 1–10 local files as separate messages; the optional caption is placed on the last file. Refused unless `MIZITO_ALLOW_SEND=1`. |
 | `mizito mcp` | Starts the stdio MCP server. |
 
 **Naming a chat.** `<chat>` is a chat id or a chat name. Names are matched ignoring case, Arabic vs
 Persian letter forms (`ي`/`ی`, `ك`/`ک`, `ى`), Arabic-Indic vs Persian digits, and all spaces and ZWNJ
 (half-space), so `علیرضا` finds `علی‌رضا`.
 Reading and searching accept a unique partial name; if several chats match you get an error listing
-them. `send` requires an **exact** id or name so a message can't go to the wrong chat.
+them. `send` and `send-files` require an **exact** id or name so a message can't go to the wrong chat.
 
 ```bash
 mizito chats --json | jq '.[] | select(.unread > 0) | .name'
@@ -91,6 +92,7 @@ With the compiled binary use `"command": "/path/to/dist/mizito", "args": ["mcp"]
 | `search_chat` | `chat`, `query` | Read-only. |
 | `wait_for_messages` | `timeout_seconds` (1–120, default 30) | Long-poll: returns new messages as soon as any arrive, or `[]` on timeout. Read-only. Not registered in push mode. |
 | `send_message` | `chat` (exact id or name), `text` | **Only registered when `MIZITO_ALLOW_SEND=1`.** Annotated as destructive; clients should require approval. |
+| `send_files` | `chat` (exact id or name), `paths` (1–10 local paths), `text` (optional caption) | **Only registered when `MIZITO_ALLOW_SEND=1`.** Annotated as destructive. Requires explicit approval of the exact chat, paths, and caption. Each file is a separate message; `text` is attached to the last one. |
 
 All tools return pretty-printed JSON as text. Domain errors (unknown chat, ambiguous name, auth
 problem) come back as tool errors with a readable message.
@@ -239,10 +241,19 @@ they do not acquire the watcher lock.
 
 ## Sending
 
-Disabled unless `MIZITO_ALLOW_SEND=1`. When off, `send_message` doesn't exist as a tool and the CLI
-refuses with exit code 3. When on, messages are sent **as you**, to an exact chat id or name. Text is
-sent exactly as plain text and newline characters are preserved; Mizito does not render HTML tags.
-Replies, mentions and attachments aren't supported.
+Disabled unless `MIZITO_ALLOW_SEND=1`. When off, `send_message` and `send_files` don't exist as MCP
+tools and the CLI refuses sends with exit code 3. When on, messages are sent **as you**, to an exact
+chat id or name. Text is sent exactly as plain text and newline characters are preserved; Mizito does
+not render HTML tags.
+
+File sends accept 1–10 local regular files, each at most 20 MB. All paths are validated and read before
+the first upload. MIME types are detected from common extensions (including PDF, PowerPoint, Word,
+Excel, images, audio, video, archives and text formats), with `application/octet-stream` as the
+fallback. Mizito receives each file in its own chat message; `--text` / MCP `text` is the caption on
+the last file. Directories, symlinks, missing files and oversized files are rejected locally.
+
+Uploads use Mizito's web-client multipart shape: `POST /api/content/upload`, `x-token`, file field
+`upload`, and form field `sendAsFile=true`. Replies and mentions aren't supported.
 
 ## Configuration
 

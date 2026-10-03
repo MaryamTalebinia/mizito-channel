@@ -10,6 +10,7 @@ export interface CliDeps {
   chats: Pick<ChatService, "listChats" | "resolveChat" | "readMessages" | "search">;
   watcher: () => { poll(): Promise<Message[]>; pollBatch?(): Promise<Batch> };
   send: (chatId: string, text: string) => Promise<void>;
+  sendFiles: (chatId: string, paths: string[], text?: string) => Promise<void>;
   login: () => Promise<void>;
   startMcp: () => Promise<void>;
   pollIntervalMs: number;
@@ -34,11 +35,17 @@ const fmt = (m: Message) =>
 
 export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<number> {
   try {
-    const { values, positionals } = parseArgs({
-      args: argv,
-      allowPositionals: true,
-      options: { json: { type: "boolean" }, limit: { type: "string" } },
-    });
+    const { values, positionals } = argv[0] === "send-files"
+      ? parseArgs({
+          args: argv,
+          allowPositionals: true,
+          options: { json: { type: "boolean" }, limit: { type: "string" }, text: { type: "string" } },
+        })
+      : parseArgs({
+          args: argv,
+          allowPositionals: true,
+          options: { json: { type: "boolean" }, limit: { type: "string" } },
+        });
     const [cmd, ...rest] = positionals;
     const json = values.json === true;
     const need = (n: number, usage: string) => {
@@ -114,6 +121,13 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
         await deps.send(chat.id, rest.slice(1).join(" "));
         return 0;
       }
+      case "send-files": {
+        need(2, "send-files <chat> <path...> [--text <caption>]");
+        const chat = await deps.chats.resolveChat(rest[0]!, { exact: true });
+        const caption = "text" in values && typeof values.text === "string" ? values.text : undefined;
+        await deps.sendFiles(chat.id, rest.slice(1), caption);
+        return 0;
+      }
       case "login":
         await deps.login();
         return 0;
@@ -121,7 +135,7 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
         await deps.startMcp();
         return 0;
       default:
-        throw new Usage("usage: mizito <chats|read|search|watch|hermes-watch|send|login|mcp> ...");
+        throw new Usage("usage: mizito <chats|read|search|watch|hermes-watch|send|send-files|login|mcp> ...");
     }
   } catch (e) {
     if (e instanceof Usage) {

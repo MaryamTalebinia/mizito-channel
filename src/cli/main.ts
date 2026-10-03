@@ -8,7 +8,7 @@ import { loadConfig } from "../core/config";
 import { PidLock } from "../core/lock";
 import { ConfigError } from "../core/errors";
 import { CursorStore } from "../core/cursor";
-import { sendMessage } from "../core/send";
+import { sendFiles, sendMessage } from "../core/send";
 import { FileCredentialStore, FileNameCache, FileTokenStore, LoginThrottle, loadCredentials } from "../core/stores";
 import { Watcher } from "../core/watcher";
 import { type McpDeps, createMcpServer, startPush } from "../mcp/server";
@@ -75,11 +75,14 @@ async function main(): Promise<number> {
   const watcher = new Watcher({ chats, cursors: await CursorStore.open(join(config.home, "cursors.json")), lock });
   const send = (chatId: string, text: string) =>
     sendMessage(client, chatId, text, { allowSend: config.allowSend, userId: config.userId });
+  const sendLocalFiles = (chatId: string, paths: string[], text?: string) =>
+    sendFiles(client, chatId, paths, text, { allowSend: config.allowSend, userId: config.userId });
 
   const mcpDeps: McpDeps = {
     chats,
     watcher,
     send,
+    sendFiles: sendLocalFiles,
     allowSend: config.allowSend,
     push: process.env.MIZITO_PUSH === "1",
     pollIntervalMs: config.pollIntervalMs,
@@ -92,6 +95,7 @@ async function main(): Promise<number> {
     chats,
     watcher: () => watcher,
     send,
+    sendFiles: sendLocalFiles,
     pollIntervalMs: config.pollIntervalMs,
     hermesWebhookUrl: process.env.HERMES_WEBHOOK_URL,
     hermesWebhookSecret: process.env.HERMES_WEBHOOK_SECRET,
