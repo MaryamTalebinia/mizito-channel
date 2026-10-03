@@ -8,8 +8,12 @@ import { msg } from "./helpers";
 
 const chat: Chat = { id: "c1", name: "Ata", isGroup: false, unread: 1, messagesCount: 3 };
 
-function deps(over: Partial<McpDeps> = {}): McpDeps & { sent: [string, string][] } {
+function deps(over: Partial<McpDeps> = {}): McpDeps & {
+  sent: [string, string][];
+  filesSent: [string, string[], string | undefined][];
+} {
   const sent: [string, string][] = [];
+  const filesSent: [string, string[], string | undefined][] = [];
   return {
     chats: {
       listChats: async () => [chat],
@@ -19,10 +23,12 @@ function deps(over: Partial<McpDeps> = {}): McpDeps & { sent: [string, string][]
     },
     watcher: { poll: async () => [msg(9, { text: "fresh" })] },
     send: async (id, text) => { sent.push([id, text]); },
+    sendFiles: async (id, paths, text) => { filesSent.push([id, paths, text]); },
     allowSend: false,
     push: false,
     pollIntervalMs: 1,
     sent,
+    filesSent,
     ...over,
   };
 }
@@ -45,10 +51,15 @@ test("registers read tools and hides send by default", async () => {
 
 test("send_message appears only when allowed, annotated as destructive", async () => {
   const { client } = await connect(deps({ allowSend: true }));
-  const send = (await client.listTools()).tools.find((t) => t.name === "send_message");
+  const tools = (await client.listTools()).tools;
+  const send = tools.find((t) => t.name === "send_message");
   expect(send).toBeDefined();
   expect(send!.annotations?.destructiveHint).toBe(true);
   expect(send!.annotations?.readOnlyHint).toBe(false);
+  const files = tools.find((t) => t.name === "send_files");
+  expect(files).toBeDefined();
+  expect(files!.annotations?.destructiveHint).toBe(true);
+  expect(files!.description).toContain("explicit approval");
 });
 
 test("read tools are annotated read-only", async () => {
@@ -108,6 +119,20 @@ test("send_message sends when allowed", async () => {
   const r: any = await client.callTool({ name: "send_message", arguments: { chat: "Ata", text: "hi" } });
   expect(r.isError).toBeFalsy();
   expect(d.sent).toEqual([["c1", "hi"]]);
+});
+
+test("send_files uses exact chat matching and passes paths and optional caption", async () => {
+  let seen: unknown;
+  const d = deps({ allowSend: true });
+  d.chats.resolveChat = async (_ref: string, o?: unknown) => { seen = o; return chat; };
+  const { client } = await connect(d);
+  const r: any = await client.callTool({
+    name: "send_files",
+    arguments: { chat: "Ata", paths: ["/tmp/a.pdf", "/tmp/b.pptx"], text: "caption" },
+  });
+  expect(r.isError).toBeFalsy();
+  expect(seen).toEqual({ exact: true });
+  expect(d.filesSent).toEqual([["c1", ["/tmp/a.pdf", "/tmp/b.pptx"], "caption"]]);
 });
 
 test("push mode drops wait_for_messages and pushes channel notifications", async () => {

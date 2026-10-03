@@ -10,6 +10,7 @@ function harness(over: Partial<CliDeps> = {}, signal?: AbortSignal) {
   const out: string[] = [];
   const err: string[] = [];
   const sent: [string, string][] = [];
+  const filesSent: [string, string[], string | undefined][] = [];
   const deps: CliDeps = {
     chats: {
       listChats: async () => [chat],
@@ -19,6 +20,7 @@ function harness(over: Partial<CliDeps> = {}, signal?: AbortSignal) {
     },
     watcher: () => ({ poll: async () => [] }),
     send: async (id, text) => { sent.push([id, text]); },
+    sendFiles: async (id, paths, text) => { filesSent.push([id, paths, text]); },
     login: async () => { out.push("logged-in"); },
     startMcp: async () => { out.push("mcp-started"); },
     pollIntervalMs: 1,
@@ -26,7 +28,7 @@ function harness(over: Partial<CliDeps> = {}, signal?: AbortSignal) {
     ...over,
   };
   const run = (argv: string[]) => runCli(argv, deps, { out: (s) => out.push(s), err: (s) => err.push(s), signal });
-  return { run, out, err, sent };
+  return { run, out, err, sent, filesSent };
 }
 
 test("chats prints a table row per chat", async () => {
@@ -82,6 +84,20 @@ test("send maps SendDisabled to exit code 3 with a message on stderr", async () 
   const h = harness({ send: async () => { throw new SendDisabled(); } });
   expect(await h.run(["send", "Ata", "hi"])).toBe(3);
   expect(h.err.join("")).toContain("MIZITO_ALLOW_SEND=1");
+});
+
+test("send-files resolves exactly and sends paths with an optional --text caption", async () => {
+  let seen: unknown;
+  const h = harness({
+    chats: {
+      listChats: async () => [chat],
+      resolveChat: async (_ref: string, o?: unknown) => { seen = o; return chat; },
+      readMessages: async () => [], search: async () => [],
+    },
+  });
+  expect(await h.run(["send-files", "Ata", "/tmp/a.pdf", "/tmp/b.pptx", "--text", "caption here"])).toBe(0);
+  expect(seen).toEqual({ exact: true });
+  expect(h.filesSent).toEqual([["c1", ["/tmp/a.pdf", "/tmp/b.pptx"], "caption here"]]);
 });
 
 test("auth errors exit 2", async () => {

@@ -73,3 +73,49 @@ test("beforeLogin runs before every login, and its failure prevents the login re
   await expect(blocked.post("/api/x")).rejects.toBeInstanceOf(AuthError);
   expect(f2.calls).toHaveLength(0);
 });
+
+test("upload uses the web client's multipart shape", async () => {
+  const media = { _: "messageMediaDocument", document: { name: "report.pdf" } };
+  const f = scriptedFetch([json(media)]);
+  const c = new MizitoClient({ credentials, baseUrl: "https://x", fetch: f, token: "T" });
+  expect(await c.upload("report.pdf", new Blob(["pdf"]), "application/pdf")).toEqual(media);
+  const call = f.calls[0]!;
+  expect(call.url).toBe("https://x/api/content/upload");
+  expect(call.init.method).toBe("POST");
+  expect(tokenOf(call)).toBe("T");
+  expect((call.init.headers as Record<string, string>)["content-type"]).toBeUndefined();
+  const form = call.init.body as FormData;
+  expect(form.get("sendAsFile")).toBe("true");
+  const file = form.get("upload") as File;
+  expect(file.name).toBe("report.pdf");
+  expect(file.type).toBe("application/pdf");
+  expect(await file.text()).toBe("pdf");
+});
+
+test("upload shares lazy login, one 401 retry, rate-limit, and JSON handling", async () => {
+  const f = scriptedFetch([
+    json({ status: 1, token: "T1" }), json({}, 401),
+    json({ status: 1, token: "T2" }), json({ _: "messageMediaDocument" }),
+  ]);
+  const c = new MizitoClient({ credentials, baseUrl: "https://x", fetch: f });
+  await c.upload("a.txt", new Blob(["a"]), "text/plain");
+  expect(tokenOf(f.calls[1]!)).toBe("T1");
+  expect(tokenOf(f.calls[3]!)).toBe("T2");
+  const limited = new MizitoClient({ credentials, baseUrl: "https://x", fetch: scriptedFetch([json({}, 429)]), token: "T" });
+  await expect(limited.upload("a", new Blob(), "application/octet-stream")).rejects.toBeInstanceOf(RateLimited);
+  const invalid = new MizitoClient({ credentials, baseUrl: "https://x", fetch: scriptedFetch([html("no")]), token: "T" });
+  await expect(invalid.upload("a", new Blob(), "application/octet-stream")).rejects.toBeInstanceOf(SchemaError);
+});
+
+test("upload errors never disclose the session token", async () => {
+  const token = "TOP-SECRET-TOKEN";
+  const f = scriptedFetch([() => { throw new Error(`failed with ${token}`); }]);
+  const c = new MizitoClient({ credentials, baseUrl: "https://x", fetch: f, token });
+  try {
+    await c.upload("a", new Blob(), "application/octet-stream");
+    throw new Error("expected upload failure");
+  } catch (e) {
+    expect(String(e)).not.toContain(token);
+    expect(e).toBeInstanceOf(NetworkError);
+  }
+});

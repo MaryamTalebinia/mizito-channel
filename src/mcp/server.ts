@@ -19,6 +19,7 @@ export interface McpDeps {
     releaseLease?(): void;
   };
   send: (chatId: string, text: string) => Promise<void>;
+  sendFiles: (chatId: string, paths: string[], text?: string) => Promise<void>;
   allowSend: boolean;
   push: boolean;
   pushChatIds?: Set<string>;
@@ -102,18 +103,38 @@ export function createMcpServer(deps: McpDeps): McpServer {
   }
 
   if (deps.allowSend) {
+    const destructive = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
     server.registerTool(
       "send_message",
       {
         description: "Send a message AS THE USER. Only use with explicit user approval.",
         inputSchema: { chat: z.string(), text: z.string().min(1) },
-        annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+        annotations: destructive,
       },
       ({ chat, text }) =>
         guard(async () => {
           const c = await deps.chats.resolveChat(chat, { exact: true });
           await deps.send(c.id, text);
           return { sent: true, chat: c.name };
+        }),
+    );
+    server.registerTool(
+      "send_files",
+      {
+        description:
+          "Upload local files and send them AS THE USER. Use only after explicit approval of the exact chat, file paths, and caption. Each file becomes its own message; the caption is attached to the last file.",
+        inputSchema: {
+          chat: z.string().describe("Exact chat id or name"),
+          paths: z.array(z.string().min(1)).min(1).max(10).describe("Local file paths, in send order"),
+          text: z.string().optional().describe("Optional caption, sent with the last file"),
+        },
+        annotations: destructive,
+      },
+      ({ chat, paths, text }) =>
+        guard(async () => {
+          const c = await deps.chats.resolveChat(chat, { exact: true });
+          await deps.sendFiles(c.id, paths, text);
+          return { sent: true, chat: c.name, files: paths.length };
         }),
     );
   }

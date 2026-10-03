@@ -1,4 +1,4 @@
-# Mizito API findings (observed 2026-10-01, shapes only)
+# Mizito API findings (observed 2026-10-01; file-send shape verified from web-client behavior 2026-10-02)
 
 Observed by running read-only calls from inside a logged-in web session (the `x-token` stayed in the page).
 No message text or tokens are recorded here. **Not yet verified:** the login endpoint (needs a password).
@@ -33,11 +33,25 @@ Login with `loginCode: ""` and `regId: ""` succeeds (`POST /capi/session/create`
 - `_` is `"message"` or `"messageService"` (service notices such as joins/leaves; they carry `action: {_: "messageActionChatAddUser", users: [...]}` instead of text).
 - `media` (null or object) describes attachments: `{_: "messageMediaPhoto"|"Video"|"Document"|"Audio"|"MentionInChat"|"MentionInTask"|"TaskSchedule", <photo|video|document|audio|task|...>: {...}}`. Photo/video/document inner objects have `name` (video/document also `size`); task cards have `title`. Attachment-only messages have an empty `message`.
 
+## POST /api/content/upload (multipart)
+- Verified from captured web-client behavior and the read-only reference implementation; no live file or message was sent during implementation.
+- Header: `x-token: <session token>`. Do not set `content-type` manually; the multipart encoder supplies the boundary.
+- Parts: file field `upload`; text field `sendAsFile=true`.
+- The JSON response is the media object used by chat sending, for example `{_: "messageMediaDocument", document: {...}}`.
+- It follows the normal authenticated request behavior: lazy login, retry once after HTTP 401, HTTP 429 as rate limiting, and JSON/schema/network errors without exposing the token.
+
+## POST /api/chat/send with an attachment
+- Web-client message shape: `{_:"message", _id:<local number>, local:<same number>, dialog, out:true, message, media, from, date:<ms>, reply_to:null, mention:[], seen_count:1, randomId:<number>, pending:true}`.
+- For attachment messages, `media` is the upload response plus `view_as_entity:true` and the same `randomId` as the outer message.
+- Multiple files are separate chat messages. Text/caption is empty on every file except the last.
+- Local safety limits in this project: 1–10 regular files, maximum 20 MB each; validate/read all files before the first network request.
+
 ## Implemented because of these findings
 - DM names via `workspace/getUsers` (one call), cached by peer id in `MIZITO_HOME/names.json`.
 - Own user id from `workspace/userId` `uid` (no `MIZITO_USER_ID` needed).
 - `messageService` entries are flagged `service` and never delivered as new messages.
 - Attachments exposed as `attachment {kind, name?, size?}`; attachment-only messages render as `[photo: a.jpg]`.
+- File upload and attachment sending using the web-client multipart and message shapes, guarded by `MIZITO_ALLOW_SEND=1`.
 
 ## Still unknown
 - socket.io URL/events for realtime (not captured; polling ships).
