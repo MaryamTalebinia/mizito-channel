@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { AmbiguousChat, ChatNotFound } from "../src/core/errors";
+import { AmbiguousChat, ChatNotFound, MediaLimitError, VoiceNotFound } from "../src/core/errors";
 import { ChatService, normalizeName } from "../src/core/chats";
-import type { Poster } from "../src/core/client";
+import type { MizitoClient, Poster } from "../src/core/client";
 
 interface Extra { users?: unknown[]; uid?: string; usersFail?: boolean }
 function fakePoster(dialogs: unknown[], history: Record<string, unknown[]>, extra: Extra = {}) {
@@ -203,4 +203,64 @@ test("matching ignores spaces and ZWNJ entirely and folds alef maksura", async (
   expect((await svc.resolveChat("علی رضا")).id).toBe("x");
   expect((await svc.resolveChat("علیرضا", { exact: true })).id).toBe("x");
   expect(normalizeName("مصطفى")).toBe(normalizeName("مصطفی"));
+});
+
+test("fetchVoiceAudio requires an exact chat and an audio voice-note message id", async () => {
+  const messageId = "0123456789abcdef01234567";
+  const contentToken = "signed-content-token";
+  const f = fakePoster(dmDialogs, {
+    g1: [{
+      _id: messageId,
+      _: "message",
+      media: { _: "messageMediaAudio", audio: { is_voice: true, content: contentToken, duration: 12, size: 5 } },
+    }],
+  });
+  let seenToken = "";
+  const client = {
+    async downloadAudio(token: string) {
+      seenToken = token;
+      return { body: new ReadableStream({ start(controller) { controller.close(); } }), size: 0 };
+    },
+  } as MizitoClient;
+  const service = new ChatService(f.poster);
+  await expect(service.fetchVoiceAudio("Group One", messageId, client)).resolves.toMatchObject({ size: 0 });
+  expect(seenToken).toBe(contentToken);
+  expect(f.calls.filter((call) => call.path.endsWith("getHistory")).map((call) => call.body)).toEqual([
+    { dialog: "g1", offset: 0 },
+  ]);
+  expect(await service.fetchVoiceAudio("Group", messageId, client).catch((error) => error)).toBeInstanceOf(ChatNotFound);
+});
+
+test("fetchVoiceAudio rejects non-voice attachments and out-of-bound durations before downloading", async () => {
+  const messageId = "0123456789abcdef01234567";
+  const rows = [
+    { _id: messageId, _: "message", media: { _: "messageMediaAudio", audio: { is_voice: false, content: "token", duration: 1 } } },
+  ];
+  const client = { downloadAudio: async () => { throw new Error("must not download"); } } as unknown as MizitoClient;
+  const service = new ChatService(fakePoster(dmDialogs, { g1: rows }).poster);
+  await expect(service.fetchVoiceAudio("Group One", messageId, client)).rejects.toBeInstanceOf(VoiceNotFound);
+
+  const longVoice = [{
+    _id: messageId,
+    _: "message",
+    media: { _: "messageMediaAudio", audio: { is_voice: true, content: "token", duration: 601, size: 10 } },
+  }];
+  const longService = new ChatService(fakePoster(dmDialogs, { g1: longVoice }).poster);
+  await expect(longService.fetchVoiceAudio("Group One", messageId, client)).rejects.toBeInstanceOf(MediaLimitError);
+});
+
+test("fetchVoiceAudio reads no more than 200 recent messages", async () => {
+  const messageId = "0123456789abcdef01234567";
+  const rows = Array.from({ length: 210 }, (_, index) => ({
+    _id: index === 200 ? messageId : `message-${index}`,
+    _: "message",
+    media: { _: "messageMediaAudio", audio: { is_voice: true, content: "token" } },
+  }));
+  const f = fakePoster(dmDialogs, { g1: rows });
+  const client = { downloadAudio: async () => { throw new Error("message lies outside the bound"); } } as unknown as MizitoClient;
+  const service = new ChatService(f.poster);
+  await expect(service.fetchVoiceAudio("Group One", messageId, client)).rejects.toBeInstanceOf(VoiceNotFound);
+  expect(f.calls.filter((call) => call.path.endsWith("getHistory")).map((call) => call.body.offset)).toEqual(
+    Array.from({ length: 13 }, (_, index) => index * 15),
+  );
 });

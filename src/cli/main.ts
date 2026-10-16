@@ -9,6 +9,9 @@ import { PidLock } from "../core/lock";
 import { ConfigError } from "../core/errors";
 import { CursorStore } from "../core/cursor";
 import { sendFiles, sendMessage } from "../core/send";
+import { downloadImage, downloadVoice } from "../core/download";
+import { createChatLogMediaProvider } from "../core/log-media";
+import { runChatLog } from "./log";
 import { FileCredentialStore, FileNameCache, FileTokenStore, LoginThrottle, loadCredentials } from "../core/stores";
 import { Watcher } from "../core/watcher";
 import { type McpDeps, createMcpServer, startPush } from "../mcp/server";
@@ -84,6 +87,9 @@ async function main(): Promise<number> {
     send,
     sendFiles: sendLocalFiles,
     allowSend: config.allowSend,
+    allowDownload: config.allowDownload,
+    downloadAudio: (chat, id) => downloadVoice(chats, client, chat, id, config.home, config.allowDownload),
+    downloadImage: (chat, id) => downloadImage(chats, client, chat, id, config.home, config.allowDownload),
     push: process.env.MIZITO_PUSH === "1",
     pollIntervalMs: config.pollIntervalMs,
   };
@@ -93,9 +99,17 @@ async function main(): Promise<number> {
 
   return runCli(process.argv.slice(2), {
     chats,
+    log: (args, io) => runChatLog(args, {
+      source: chats, allowDownload: config.allowDownload,
+      fetchMedia: createChatLogMediaProvider(chats, client, config.allowDownload),
+      signal: io.signal, out: io.out, err: io.err,
+    }),
     watcher: () => watcher,
     send,
     sendFiles: sendLocalFiles,
+    allowDownload: config.allowDownload,
+    downloadAudio: (chat, id) => downloadVoice(chats, client, chat, id, config.home, config.allowDownload),
+    downloadImage: (chat, id) => downloadImage(chats, client, chat, id, config.home, config.allowDownload),
     pollIntervalMs: config.pollIntervalMs,
     hermesWebhookUrl: process.env.HERMES_WEBHOOK_URL,
     hermesWebhookSecret: process.env.HERMES_WEBHOOK_SECRET,

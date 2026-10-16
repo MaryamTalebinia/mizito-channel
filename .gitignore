@@ -25,3 +25,12 @@ spike-output
 
 # bun build temp artifacts
 *.bun-build
+
+# private SQLite chat archives and media (never source artifacts)
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+downloads/

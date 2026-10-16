@@ -25,6 +25,8 @@ function deps(over: Partial<McpDeps> = {}): McpDeps & {
     send: async (id, text) => { sent.push([id, text]); },
     sendFiles: async (id, paths, text) => { filesSent.push([id, paths, text]); },
     allowSend: false,
+    allowDownload: false,
+    downloadAudio: async () => { throw new Error("unexpected download"); },
     push: false,
     pollIntervalMs: 1,
     sent,
@@ -47,6 +49,34 @@ test("registers read tools and hides send by default", async () => {
   const { client } = await connect(deps());
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
   expect(names).toEqual(["list_chats", "read_messages", "search_chat", "wait_for_messages"]);
+});
+
+test("download_audio is hidden unless enabled and requires explicit exact inputs", async () => {
+  const called: string[] = [];
+  const d = deps({
+    allowDownload: true,
+    downloadAudio: async (name, id) => {
+      called.push(name, id);
+      return { downloaded: true, path: `/private/${id}.mp3`, size: 3, mime: "audio/mpeg" };
+    },
+  });
+  const { client } = await connect(d);
+  const tool = (await client.listTools()).tools.find((item) => item.name === "download_audio");
+  expect(tool).toBeDefined();
+  expect(tool!.description).toContain("explicitly requests it");
+  expect(tool!.annotations?.readOnlyHint).toBe(false);
+  expect(tool!.annotations?.destructiveHint).toBe(false);
+  const id = "0123456789abcdef01234567";
+  const result: any = await client.callTool({ name: "download_audio", arguments: { chat: "Ata", message_id: id } });
+  expect(result.isError).toBeFalsy();
+  expect(JSON.parse(textOf(result))).toEqual({ downloaded: true, path: `/private/${id}.mp3`, size: 3, mime: "audio/mpeg" });
+  expect(called).toEqual(["Ata", id]);
+});
+
+test("download_audio tool validates message ids", async () => {
+  const { client } = await connect(deps({ allowDownload: true, downloadAudio: async () => ({ ok: true }) }));
+  const result: any = await client.callTool({ name: "download_audio", arguments: { chat: "Ata", message_id: "not-an-id" } });
+  expect(result.isError).toBe(true);
 });
 
 test("send_message appears only when allowed, annotated as destructive", async () => {
@@ -263,4 +293,18 @@ test("push backs off while idle and after errors, using the injected sleep", asy
   await new Promise((r) => setTimeout(r, 30));
   console.error = orig;
   expect(delays).toEqual([1500, 3000, 1000]);
+});
+
+test("download_image is hidden independently of send and exposes only safe result metadata", async () => {
+  let calls=0;
+  const provider=async()=>{calls++;return {path:"/private/image.png",mime:"image/png",size:4,width:1,height:1,downloaded:true};};
+  const hidden=await connect(deps({allowSend:true,downloadImage:provider}));
+  expect((await hidden.client.listTools()).tools.map(t=>t.name)).not.toContain("download_image"); expect(calls).toBe(0);
+  const enabled=await connect(deps({allowDownload:true,downloadImage:provider}));
+  const tool=(await enabled.client.listTools()).tools.find(t=>t.name==="download_image");
+  expect(tool?.annotations?.readOnlyHint).toBe(false); expect(tool?.description).toContain("not semantic vision");
+  const bad:any=await enabled.client.callTool({name:"download_image",arguments:{chat:"Ata",message_id:"0123456789ABCDEF01234567"}});
+  expect(bad.isError).toBe(true); expect(calls).toBe(0);
+  const result:any=await enabled.client.callTool({name:"download_image",arguments:{chat:"Ata",message_id:"0123456789abcdef01234567"}});
+  expect(JSON.parse(textOf(result)).path).toBe("/private/image.png"); expect(calls).toBe(1);
 });

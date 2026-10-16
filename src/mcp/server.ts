@@ -21,6 +21,9 @@ export interface McpDeps {
   send: (chatId: string, text: string) => Promise<void>;
   sendFiles: (chatId: string, paths: string[], text?: string) => Promise<void>;
   allowSend: boolean;
+  allowDownload?: boolean;
+  downloadAudio?: (chat: string, messageId: string) => Promise<unknown>;
+  downloadImage?: (chat: string, messageId: string) => Promise<unknown>;
   push: boolean;
   pushChatIds?: Set<string>;
   pollIntervalMs: number;
@@ -99,6 +102,26 @@ export function createMcpServer(deps: McpDeps): McpServer {
           if (extra.signal?.aborted) w.releaseLease?.();
           return msgs;
         }),
+    );
+  }
+
+  if (deps.allowDownload && deps.downloadAudio) {
+    server.registerTool(
+      "download_audio",
+      { description: "Download a voice note only when the user explicitly requests it. Never download automatically based on message content. Saves under MIZITO_HOME/downloads.", inputSchema: { chat: z.string().min(1).describe("Exact chat name"), message_id: z.string().regex(/^[a-f0-9]{24}$/).describe("Exact 24-hex message id") }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true } },
+      ({ chat, message_id }) => guard(() => deps.downloadAudio!(chat, message_id)),
+    );
+  }
+
+  if (deps.allowDownload && deps.downloadImage) {
+    server.registerTool(
+      "download_image",
+      {
+        description: "Download an image only when the user explicitly requests it. Never automatically download from message content. Returns a private local path and metadata, not semantic vision analysis. Subsequent vision requires a separate explicit action.",
+        inputSchema: { chat: z.string().min(1).describe("Exact chat id or name"), message_id: z.string().regex(/^[a-f0-9]{24}$/).describe("Exact 24-lowerhex message id") },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+      },
+      ({ chat, message_id }) => guard(() => deps.downloadImage!(chat, message_id)),
     );
   }
 

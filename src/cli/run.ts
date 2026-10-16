@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import type { ChatService } from "../core/chats";
 import { type Batch, nextBatch } from "../core/watcher";
 import { Backoff } from "../core/backoff";
-import { ConfigError, MizitoError, NetworkError, RateLimited } from "../core/errors";
+import { ConfigError, DownloadDisabled, MizitoError, NetworkError, RateLimited } from "../core/errors";
 import { type HermesFetch, runHermesWatch } from "../core/hermes";
 import { describeMessage, type Message } from "../core/models";
 
@@ -11,6 +11,10 @@ export interface CliDeps {
   watcher: () => { poll(): Promise<Message[]>; pollBatch?(): Promise<Batch> };
   send: (chatId: string, text: string) => Promise<void>;
   sendFiles: (chatId: string, paths: string[], text?: string) => Promise<void>;
+  allowDownload?: boolean;
+  downloadAudio?: (chat: string, messageId: string) => Promise<unknown>;
+  downloadImage?: (chat: string, messageId: string) => Promise<unknown>;
+  log?: (args: string[], io: CliIo) => Promise<number>;
   login: () => Promise<void>;
   startMcp: () => Promise<void>;
   pollIntervalMs: number;
@@ -28,13 +32,17 @@ export interface CliIo {
 
 class Usage extends Error {}
 
-const EXIT: Record<string, number> = { AUTH: 2, SEND_DISABLED: 3 };
+const EXIT: Record<string, number> = { AUTH: 2, SEND_DISABLED: 3, DOWNLOAD_DISABLED: 4 };
 
 const fmt = (m: Message) =>
   `[${new Date(m.date).toISOString()}] ${m.chatName} / ${m.sender}: ${describeMessage(m)}`;
 
 export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<number> {
   try {
+    if (argv[0] === "log") {
+      if (!deps.log) throw new ConfigError("Chat logger is unavailable in this build");
+      return await deps.log(argv.slice(1), io);
+    }
     const { values, positionals } = argv[0] === "send-files"
       ? parseArgs({
           args: argv,
@@ -128,6 +136,18 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
         await deps.sendFiles(chat.id, rest.slice(1), caption);
         return 0;
       }
+      case "download-audio":
+      case "download-image": {
+        const download = cmd === "download-image" ? deps.downloadImage : deps.downloadAudio;
+        if (!deps.allowDownload || !download) throw new DownloadDisabled();
+        if (rest.length !== 2) throw new Usage(`usage: mizito ${cmd} <exact-chat> <24-lowerhex-message-id> [--json]`);
+        if (!/^[a-f0-9]{24}$/.test(rest[1]!)) {
+          throw new Usage("message id must be exactly 24 hexadecimal characters");
+        }
+        const result = await download(rest[0]!, rest[1]!);
+        io.out(json ? JSON.stringify(result, null, 2) : String((result as { path: string }).path));
+        return 0;
+      }
       case "login":
         await deps.login();
         return 0;
@@ -135,7 +155,7 @@ export async function runCli(argv: string[], deps: CliDeps, io: CliIo): Promise<
         await deps.startMcp();
         return 0;
       default:
-        throw new Usage("usage: mizito <chats|read|search|watch|hermes-watch|send|send-files|login|mcp> ...");
+        throw new Usage("usage: mizito <chats|read|search|watch|hermes-watch|send|send-files|download-audio|download-image|log|login|mcp> ...");
     }
   } catch (e) {
     if (e instanceof Usage) {

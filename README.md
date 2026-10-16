@@ -39,6 +39,22 @@ bun run build                        # produces dist/mizito
 
 Examples below use `mizito` for whichever you run (`bun src/cli/main.ts` or `./dist/mizito`).
 
+## Local SQLite chat logger
+
+`mizito log` explicitly archives selected exact chat IDs/names into a local SQLite database. Message text and actual supported voice/image bytes are stored in the database as BLOBs, not temporary-file pointers. Existing authentication is reused. It never sends messages, marks chats read, or takes the live watcher's lock/cursors.
+
+```bash
+# Text plus attachment metadata, latest 150 messages from one exact chat
+mizito log "Exact team name" --db "$HOME/.config/mizito/chat-log/history.sqlite" --limit 150 --json
+
+# Include supported voice notes and JPEG/PNG/WebP photos; poll the recent window every 30 seconds
+MIZITO_ALLOW_DOWNLOAD=1 mizito log "Exact team name" --db "$HOME/.config/mizito/chat-log/history.sqlite" --limit 150 --media --follow --interval 30 --json
+```
+
+`--media` and `MIZITO_ALLOW_DOWNLOAD=1` are both required for media collection. Downloads remain off for ordinary read/search/watch calls. Multiple explicit chat arguments are accepted; wildcard/all-chat collection is not implicit. Reruns deduplicate messages, update observed edits/deletions, reuse successful unchanged media, and retry failures. Documents/videos and other unsupported media are recorded as metadata with an explicit unsupported status, never falsely reported as archived bytes. There is no cloud vision or transcription in this logger.
+
+**The archive is plaintext, not encrypted.** It contains private messages and requested media; protect it and its backups. The directory is mode `0700` and DB `0600`; unsafe existing paths are refused. Output is counters only. `--follow` runs in the foreground until Ctrl-C; no service is installed or collection started automatically. This is a bounded recent-window logger, not a promise of complete history or gap-free capture during bursts exceeding the window. See [logger details](docs/chat-logger.md).
+
 ## CLI
 
 | Command | What it does |
@@ -51,6 +67,8 @@ Examples below use `mizito` for whichever you run (`bun src/cli/main.ts` or `./d
 | `mizito hermes-watch` | Durably forwards incoming messages to a signed Hermes webhook. Requires `HERMES_WEBHOOK_URL` and `HERMES_WEBHOOK_SECRET`. |
 | `mizito send <chat> <text>` | Sends a message as you. Refused unless `MIZITO_ALLOW_SEND=1`. |
 | `mizito send-files <chat> <path...> [--text <caption>]` | Uploads and sends 1–10 local files as separate messages; the optional caption is placed on the last file. Refused unless `MIZITO_ALLOW_SEND=1`. |
+| `mizito download-audio <exact-chat> <24-lowerhex-message-id> [--json]` | Explicit gated voice-note download. |
+| `mizito download-image <exact-chat> <24-lowerhex-message-id> [--json]` | Explicit gated JPEG/PNG/WebP photo download. |
 | `mizito mcp` | Starts the stdio MCP server. |
 
 **Naming a chat.** `<chat>` is a chat id or a chat name. Names are matched ignoring case, Arabic vs
@@ -91,6 +109,8 @@ With the compiled binary use `"command": "/path/to/dist/mizito", "args": ["mcp"]
 | `read_messages` | `chat` (id or partial name), `limit` (1–100, optional) | Newest first. Read-only. |
 | `search_chat` | `chat`, `query` | Read-only. |
 | `wait_for_messages` | `timeout_seconds` (1–120, default 30) | Long-poll: returns new messages as soon as any arrive, or `[]` on timeout. Read-only. Not registered in push mode. |
+| `download_audio` | `chat` (exact id or name), `message_id` (24 lowercase hex) | Explicit media access, local path and metadata only. Registered only with `MIZITO_ALLOW_DOWNLOAD=1`. |
+| `download_image` | `chat` (exact id or name), `message_id` (24 lowercase hex) | Explicit photo access, **not vision analysis**. Registered only with `MIZITO_ALLOW_DOWNLOAD=1`. |
 | `send_message` | `chat` (exact id or name), `text` | **Only registered when `MIZITO_ALLOW_SEND=1`.** Annotated as destructive; clients should require approval. |
 | `send_files` | `chat` (exact id or name), `paths` (1–10 local paths), `text` (optional caption) | **Only registered when `MIZITO_ALLOW_SEND=1`.** Annotated as destructive. Requires explicit approval of the exact chat, paths, and caption. Each file is a separate message; `text` is attached to the last one. |
 
@@ -255,12 +275,50 @@ the last file. Directories, symlinks, missing files and oversized files are reje
 Uploads use Mizito's web-client multipart shape: `POST /api/content/upload`, `x-token`, file field
 `upload`, and form field `sendAsFile=true`. Replies and mentions aren't supported.
 
+## Voice-note downloads
+
+Voice-note downloads are disabled unless `MIZITO_ALLOW_DOWNLOAD=1`; this gate is independent of `MIZITO_ALLOW_SEND`. `download-audio` and MCP `download_audio` require an exact chat name and 24-lowerhex message id, then re-read at most the newest 195 messages and accept only `messageMediaAudio` entries marked `audio.is_voice=true`. The tool must be invoked only on the user’s explicit request and never automatically from message content. Files are saved as `<MIZITO_HOME>/downloads/<message-id>.mp3` (directory 0700, file 0600), without overwrite, with a 20 MiB hard cap. Only `audio/mpeg` is accepted. The signed media URL token is kept internal and is never returned or logged.
+
+## Image downloads and explicit media access
+
+`MIZITO_ALLOW_DOWNLOAD=1 mizito download-image "Exact Team" 0123456789abcdef01234567 --json`
+returns only the private local path and safe metadata. `download-audio` has the same arguments.
+Message IDs must be exactly 24 **lowercase** hex characters (no normalization); chat IDs or full names
+use the existing exact-name matcher, never partial names. Download commands accept exactly two
+positional arguments and optional `--json`.
+
+The MCP tools `download_image` and `download_audio` are **absent by default** and require
+`MIZITO_ALLOW_DOWNLOAD=1`, independent of sending permission. Enabling the gate is not permission to
+automatically fetch media: only an explicit user request authorizes access to a particular chat/message.
+Read, search, list, watch and Telegram forwarding remain metadata-only, even with the gate enabled.
+
+Only eligible nondeleted, nonservice photos and voice notes in the newest **195 entries** (13 pages;
+strictly below the 200-message cap, including wrapped or oversized upstream responses) are supported.
+Images use the first bounded variant in `photo_large`, `photo_medium`, `photo_small` order, not a URL
+or an original filename. Supported image types are JPEG, PNG and WebP, with matching MIME/signature,
+bounded structural headers, complete container/end markers, actual dimensions matching metadata,
+maximum 20 MiB, maximum 16,384 per dimension and 40 million pixels. Animated PNG/WebP is rejected.
+This is structural validation, not a full image decoder or malware scanner.
+
+CDN access uses only the configured origin's fixed `/cdn/` route with `x-token`; redirects are refused.
+Media identifiers, content keys and authentication tokens are not returned or logged. Fetch/stream
+operations have a 30-second deadline, cancellation and byte limits. Native authentication and automatic
+single re-login are unchanged. Downloads never overwrite existing files, use private permissions and
+pinned directory descriptors to prevent symlink/directory-swap writes. Secure file downloads currently
+require **Linux with procfs** and fail closed elsewhere; the gated in-memory media API is portable.
+
+**Media access is not semantic analysis.** This connector does not run vision, OCR, transcription,
+cloud processing or arbitrary URL downloads. A user may explicitly authorize a separate subsequent
+vision/transcription step using the returned local file. See [media safety](docs/media-downloads.md)
+for API details and the observed-schema/live-validation boundary.
+
 ## Configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `MIZITO_USERNAME`, `MIZITO_PASSWORD` | – | Credentials. Override the saved file. Bun also loads a `.env` file from the current directory automatically (it is gitignored), so running the tool from a folder with a `.env` uses those credentials. Copy `.env.example` to `.env` to start. |
 | `MIZITO_USER_ID` | derived | Your own user id. Normally not needed; it is fetched automatically. |
+| `MIZITO_ALLOW_DOWNLOAD` | off | Only `1` enables explicit voice/image downloads; independent of sending. |
 | `MIZITO_ALLOW_SEND` | off | `1` enables sending. Any other value leaves it off. |
 | `MIZITO_PUSH` | off | `1` makes `mizito mcp` push channel notifications. Needs `MIZITO_PUSH_CHATS`. |
 | `MIZITO_PUSH_CHATS` | – | Comma-separated chat ids or exact names allowed to be pushed. |
@@ -297,6 +355,7 @@ Everything lives in `MIZITO_HOME` (default `~/.config/mizito`), created with mod
 | `1` | Any other error (network, unexpected response, unknown chat, ambiguous name…) |
 | `2` | Authentication error (no credentials, login rejected, session rejected) |
 | `3` | Sending is disabled |
+| `4` | Media downloading is disabled |
 | `64` | Usage error (unknown command, missing arguments) |
 
 ## Limitations
@@ -307,7 +366,7 @@ Everything lives in `MIZITO_HOME` (default `~/.config/mizito`), created with mod
   socket.io; using it is not implemented yet.
 - The first poll after a fresh start fetches one page per chat, which takes several seconds for
   large accounts.
-- Single account and workspace; no media download, replies, reactions or read receipts.
+- Single account and workspace; no general media download (only explicit voice-note and photo downloads), replies, reactions or read receipts.
 - No Keychain storage, and the push allowlist is per chat rather than per sender.
 
 ## Development

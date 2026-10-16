@@ -35,6 +35,27 @@ export class SendDisabled extends MizitoError {
   }
 }
 
+export class DownloadDisabled extends MizitoError {
+  constructor() {
+    super("Media downloads are disabled. Set MIZITO_ALLOW_DOWNLOAD=1 to enable.", "DOWNLOAD_DISABLED");
+  }
+}
+
+export class VoiceNotFound extends MizitoError {
+  constructor() {
+    super("No eligible voice note with that message id was found in the recent chat history", "VOICE_NOT_FOUND");
+  }
+}
+
+// Typed subtype retains compatibility with callers that already handle VoiceNotFound.
+export class UnsupportedAudio extends VoiceNotFound {}
+
+export class MediaLimitError extends MizitoError {
+  constructor() {
+    super("Media exceeds the configured size, dimensions or duration limit", "MEDIA_LIMIT");
+  }
+}
+
 export class ChatNotFound extends MizitoError {
   constructor(readonly query: string) {
     super(`No chat matches "${query}"`, "CHAT_NOT_FOUND");

@@ -107,6 +107,71 @@ test("upload shares lazy login, one 401 retry, rate-limit, and JSON handling", a
   await expect(invalid.upload("a", new Blob(), "application/octet-stream")).rejects.toBeInstanceOf(SchemaError);
 });
 
+test("voice download uses the exact CDN route, auth token, redirect policy and binary response", async () => {
+  const bytes = new Uint8Array([0x49, 0x44, 0x33]);
+  const f = scriptedFetch([
+    () => new Response(bytes, { headers: { "content-type": "audio/mpeg", "content-length": "3" } }),
+  ]);
+  const c = new MizitoClient({ credentials, baseUrl: "https://x", fetch: f, token: "T" });
+  const result = await c.downloadAudio("abc.def_123-xyz");
+  expect(result.size).toBe(3);
+  expect([...new Uint8Array(await new Response(result.body).arrayBuffer())]).toEqual([...bytes]);
+  expect(f.calls[0]!.url).toBe("https://x/cdn/abc.def_123-xyz");
+  expect(f.calls[0]!.init.method).toBe("GET");
+  expect(f.calls[0]!.init.redirect).toBe("error");
+  expect(tokenOf(f.calls[0]!)).toBe("T");
+});
+
+test("voice download rejects invalid content tokens before making a request", async () => {
+  const f = scriptedFetch([]);
+  const c = new MizitoClient({ credentials, baseUrl: "https://x", fetch: f, token: "T" });
+  await expect(c.downloadAudio("https://evil.example/audio")).rejects.toBeInstanceOf(SchemaError);
+  expect(f.calls).toHaveLength(0);
+});
+
+test("voice download uses one 401 retry and handles 429, bad MIME, oversized content and redirect errors", async () => {
+  const f = scriptedFetch([
+    json({}, 401),
+    json({ status: 1, token: "T2" }),
+    () => new Response(new Uint8Array([1]), { headers: { "content-type": "audio/mpeg", "content-length": "1" } }),
+  ]);
+  const c = new MizitoClient({ credentials, baseUrl: "https://x", fetch: f, token: "T1" });
+  const result = await c.downloadAudio("token.part");
+  expect(result.size).toBe(1);
+  expect(tokenOf(f.calls[0]!)).toBe("T1");
+  expect(tokenOf(f.calls[2]!)).toBe("T2");
+
+  const limited = new MizitoClient({ credentials, baseUrl: "https://x", fetch: scriptedFetch([json({}, 429)]), token: "T" });
+  await expect(limited.downloadAudio("token.part")).rejects.toBeInstanceOf(RateLimited);
+  const invalid = new MizitoClient({ credentials, baseUrl: "https://x", fetch: scriptedFetch([html("maintenance")]), token: "T" });
+  await expect(invalid.downloadAudio("token.part")).rejects.toBeInstanceOf(SchemaError);
+  const oversized = new MizitoClient({
+    credentials,
+    baseUrl: "https://x",
+    fetch: scriptedFetch([() => new Response(new Uint8Array([1]), { headers: { "content-type": "audio/mpeg", "content-length": String(20 * 1024 * 1024 + 1) } })]),
+    token: "T",
+  });
+  await expect(oversized.downloadAudio("token.part")).rejects.toBeInstanceOf(NetworkError);
+  const redirect = new MizitoClient({
+    credentials,
+    baseUrl: "https://x",
+    fetch: scriptedFetch([() => { throw new Error("redirect leaked token"); }]),
+    token: "T",
+  });
+  const error = await redirect.downloadAudio("token.part").catch((e) => e);
+  expect(error).toBeInstanceOf(NetworkError);
+  expect(String(error)).not.toContain("redirect leaked token");
+});
+
+test("voice download never exposes the signed token in request errors", async () => {
+  const token = "PRIVATE-CONTENT-TOKEN";
+  const f = scriptedFetch([() => { throw new Error(`request failed with ${token}`); }]);
+  const c = new MizitoClient({ credentials, baseUrl: "https://x", fetch: f, token: "SESSION" });
+  const error = await c.downloadAudio(token).catch((e) => e);
+  expect(error).toBeInstanceOf(NetworkError);
+  expect(String(error)).not.toContain(token);
+});
+
 test("upload errors never disclose the session token", async () => {
   const token = "TOP-SECRET-TOKEN";
   const f = scriptedFetch([() => { throw new Error(`failed with ${token}`); }]);

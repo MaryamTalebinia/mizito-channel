@@ -5,6 +5,7 @@ test("defaults", () => {
   const c = loadConfig({});
   expect(c.baseUrl).toBe("https://app.mizito.ir");
   expect(c.allowSend).toBe(false);
+  expect(c.allowDownload).toBe(false);
   expect(c.userId).toBeUndefined();
   expect(c.pollIntervalMs).toBe(10_000);
   expect(c.home.endsWith("/mizito")).toBe(true);
@@ -12,6 +13,11 @@ test("defaults", () => {
 
 test("MIZITO_HOME overrides the config directory", () => {
   expect(loadConfig({ MIZITO_HOME: "/tmp/x" }).home).toBe("/tmp/x");
+});
+
+test("download gate is independent and only 1 enables it", () => {
+  expect(loadConfig({ MIZITO_ALLOW_DOWNLOAD: "1" }).allowDownload).toBe(true);
+  expect(loadConfig({ MIZITO_ALLOW_DOWNLOAD: "true", MIZITO_ALLOW_SEND: "1" }).allowDownload).toBe(false);
 });
 
 test("only MIZITO_ALLOW_SEND=1 enables sending", () => {

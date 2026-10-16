@@ -53,6 +53,11 @@ Login with `loginCode: ""` and `regId: ""` succeeds (`POST /capi/session/create`
 - Attachments exposed as `attachment {kind, name?, size?}`; attachment-only messages render as `[photo: a.jpg]`.
 - File upload and attachment sending using the web-client multipart and message shapes, guarded by `MIZITO_ALLOW_SEND=1`.
 
+## GET /cdn/<encoded media token> (voice-note download)
+- In-memory read-only GET using the session `x-token` header returned HTTP 200 with `Content-Type: audio/mpeg` for a voice note. The request path is `/cdn/${encodeURIComponent(media.audio.content)}`; reject redirects.
+- `media` uses `_="messageMediaAudio"`; `audio` includes `_id`, `is_voice`, signed `content`, `name`, `size`, `duration`, and `content_key`. The signed `content` token must remain internal and must never be logged or returned.
+- Local download policy: opt-in `MIZITO_ALLOW_DOWNLOAD=1`, explicit request only, exact chat and message id, newest 200 history messages maximum, `is_voice === true`, audio/mpeg only, 20 MiB hard cap, and private non-overwriting files under `MIZITO_HOME/downloads`.
+
 ## Still unknown
 - socket.io URL/events for realtime (not captured; polling ships).
 - Server-side search endpoint.

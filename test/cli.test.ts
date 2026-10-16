@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { runCli, type CliDeps } from "../src/cli/run";
-import { AuthError, NetworkError, RateLimited, SendDisabled } from "../src/core/errors";
+import { AuthError, DownloadDisabled, NetworkError, RateLimited, SendDisabled } from "../src/core/errors";
 import type { Chat } from "../src/core/models";
 import { msg } from "./helpers";
 
@@ -84,6 +84,26 @@ test("send maps SendDisabled to exit code 3 with a message on stderr", async () 
   const h = harness({ send: async () => { throw new SendDisabled(); } });
   expect(await h.run(["send", "Ata", "hi"])).toBe(3);
   expect(h.err.join("")).toContain("MIZITO_ALLOW_SEND=1");
+});
+
+test("download-audio is gated, validates its id, and returns only the local path", async () => {
+  const disabled = harness();
+  expect(await disabled.run(["download-audio", "Ata", "0123456789abcdef01234567"])).toBe(4);
+  expect(disabled.err.join(" ")).toContain("MIZITO_ALLOW_DOWNLOAD=1");
+
+  const seen: string[] = [];
+  const enabled = harness({
+    allowDownload: true,
+    downloadAudio: async (name, id) => {
+      seen.push(name, id);
+      return { path: `/private/${id}.mp3`, size: 12, mime: "audio/mpeg" };
+    },
+  });
+  expect(await enabled.run(["download-audio", "Ata", "0123456789abcdef01234567"])).toBe(0);
+  expect(seen).toEqual(["Ata", "0123456789abcdef01234567"]);
+  expect(enabled.out).toEqual(["/private/0123456789abcdef01234567.mp3"]);
+  expect(await enabled.run(["download-audio", "Ata", "not-an-id"])).toBe(64);
+  expect(seen).toHaveLength(2);
 });
 
 test("send-files resolves exactly and sends paths with an optional --text caption", async () => {
@@ -284,4 +304,17 @@ test("watch survives rate limiting and network errors by backing off, but exits 
 
   const bad = harness({ watcher: () => ({ poll: async () => { throw new AuthError("session dead"); } }) });
   expect(await bad.run(["watch"])).toBe(2);
+});
+
+test("download-image CLI is separately gated, strictly validates and supports JSON", async () => {
+  let calls = 0;
+  const result = {path:"/private/image.png",size:4,mime:"image/png",width:1,height:1,downloaded:true};
+  const provider = async () => {calls++; return result;};
+  const disabled=harness({downloadImage:provider});
+  expect(await disabled.run(["download-image","Ata","0123456789abcdef01234567"])).toBe(4); expect(calls).toBe(0);
+  const enabled=harness({allowDownload:true,downloadImage:provider});
+  for(const args of [["Ata"],["Ata","0123456789ABCDEF01234567"],["Ata","0123456789abcdef01234567","extra"]]) expect(await enabled.run(["download-image",...args])).toBe(64);
+  expect(calls).toBe(0);
+  expect(await enabled.run(["download-image","Ata","0123456789abcdef01234567","--json"])).toBe(0);
+  expect(JSON.parse(enabled.out[0]!)).toEqual(result);
 });
